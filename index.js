@@ -14,6 +14,9 @@
 import { extension_settings } from '../../extensions.js';
 import { getRequestHeaders, characters, getCharacters, importCharacter } from '../../../script.js';
 import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldInfo } from '../../world-info.js';
+// Resolved against this module URL so the popup markup works wherever the
+// extension is served from (the overlay DOM lives under the app's base URL).
+const IMG_CHUB = new URL('chub.png', import.meta.url).href;
 
 const extensionName = "Weaver's Vault";
 const MODULE = 'weavers-vault';
@@ -74,25 +77,6 @@ function saveSettingsQuiet() {
     import('../../../script.js').then(m => m.saveSettingsDebounced());
 }
 
-// Emoji markers on tag chips (the shipped Glaze renders colored glyphs on
-// category chips; hashtag chips render cyan without one).
-const TAG_EMOJI = [
-    ['angst', '💔'], ['fluff', '🧸'], ['smut', '💋'], ['comedy', '😂'],
-    ['dominant', '⛓️'], ['submissive', '🧎'], ['dead dove', '🕊️'], ['game', '🎮'],
-    ['anime', '📺'], ['multiple', '👥'], ['anypov', '🎭'], ['malepov', '💁‍♂️'],
-    ['fempov', '💁‍♀️'], ['royalty', '👑'], ['monster', '👹'], ['magic', '✨'],
-    ['romance', '💗'], ['fantasy', '🐉'], ['adventure', '🗺️'], ['school', '🏫'],
-    ['strategy', '🧠'], ['cultivation', '☯️'], ['rpg', '🎲'], ['drama', '🎬'],
-    ['history', '📜'], ['sci-fi', '🚀'], ['science fiction', '🚀'], ['horror', '👻'],
-    ['mystery', '🔍'], ['villain', '🦹'], ['hero', '🦸'], ['non-human', '👽'],
-    ['fictional', '📚'], ['switch', '🔄'], ['maid', '🧹'], ['harem', '👥'],
-    ['cheating', '💔'], ['husband', '💍'], ['boxer', '🥊'],
-];
-function tagEmoji(tag) {
-    const l = String(tag).toLowerCase();
-    for (const [key, emoji] of TAG_EMOJI) if (l.includes(key)) return emoji;
-    return '';
-}
 
 const SORT_ICONS = {
     popular: 'fa-solid fa-star',
@@ -151,7 +135,7 @@ function ensureOverlay() {
             </div>
             <div class="wv-row2">
                 <button class="wv-glass wv-source" title="Source (more coming in v2)">
-                    <span class="wv-srclogo">C</span><span class="wv-srclabel">Chub</span><span class="fa-solid fa-chevron-down wv-dn"></span>
+                    <img class="wv-srclogo" src="${IMG_CHUB}" alt="" width="18" height="18" /><span class="wv-srclabel">Chub</span><span class="fa-solid fa-chevron-down wv-dn"></span>
                 </button>
                 <div class="wv-right">
                     <button class="wv-iconbtn wv-filterbtn" title="Filters" aria-label="Filters">
@@ -420,10 +404,11 @@ function fmtCount(n) {
     return String(n);
 }
 
+// CardTagChips (card_tag_chips.dart): NSFW/SFW/`#custom` get dedicated
+// colors; every other tag is primary-tinted. Text only — no emoji in code.
 function chipHtml(tag) {
-    const emoji = tagEmoji(tag);
-    if (emoji) return `<span class="wv-chip wv-c-cat">${emoji} ${escapeHtml(tag)}</span>`;
-    return `<span class="wv-chip wv-c-tag">#${escapeHtml(tag)}</span>`;
+    if (String(tag).startsWith('#')) return `<span class="wv-chip wv-c-tag">${escapeHtml(tag)}</span>`;
+    return `<span class="wv-chip wv-c-cat">${escapeHtml(tag)}</span>`;
 }
 
 function renderGrid() {
@@ -437,7 +422,7 @@ function renderGrid() {
         const tags = item.tags ?? [];
         const chips = [
             `<span class="wv-chip ${item.nsfw ? 'wv-c-nsfw' : 'wv-c-sfw'}">${item.nsfw ? 'NSFW' : 'SFW'}</span>`,
-            ...tags.slice(0, 8).map(chipHtml),
+            ...tags.slice(0, 8).map(t => chipHtml(`#${t}`)),
         ].join('');
         card.innerHTML = `
             <div class="wv-art ${blur ? 'wv-blur' : ''}">
@@ -498,7 +483,7 @@ function renderActiveChips() {
     }
     if (f.recommendedVerified) chips.push(`<button class="wv-fchip" data-clear="recommendedVerified">Recommended / verified <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
     for (const tag of f.tags) {
-        chips.push(`<button class="wv-fchip" data-tag="${escapeHtml(tag)}">${tagEmoji(tag)} ${escapeHtml(tag)} <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+        chips.push(`<button class="wv-fchip" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)} <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
     }
     row.innerHTML = chips.join('');
     row.querySelectorAll('.wv-fchip').forEach(b => b.addEventListener('click', () => {
@@ -866,7 +851,7 @@ function renderTagPicker() {
     const shown = folds && !state.tagExpanded ? pool.slice(0, LIMIT) : pool;
     cloud.innerHTML = shown.map(t => t.addRaw
         ? `<button class="wv-tchip wv-addraw" data-raw="1"><span class="fa-solid fa-plus"></span>${escapeHtml(t.name)}</button>`
-        : `<button class="wv-tchip" data-tag="${escapeHtml(t.name)}">${tagEmoji(t.name)} ${escapeHtml(t.name)}</button>`).join('');
+        : `<button class="wv-tchip" data-tag="${escapeHtml(t.name)}">${escapeHtml(t.name)}</button>`).join('');
     showAll.hidden = !folds;
     if (folds) showAll.innerHTML = state.tagExpanded
         ? '<span class="fa-solid fa-chevron-up"></span> Show less'

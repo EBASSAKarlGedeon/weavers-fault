@@ -152,16 +152,13 @@
     background: rgba(25, 25, 26, 0.95);
 }
 
+/* Provider logo (provider_logo.dart): bundled brand mark at native colors,
+   18x18, gap 6 from the label */
 .wv-srclogo {
     width: 18px;
     height: 18px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #7b2d8e, #c73a63);
-    display: grid;
-    place-items: center;
-    font-size: 10px;
-    font-weight: 800;
-    color: #fff;
+    object-fit: contain;
+    display: block;
     margin-right: 1px;
 }
 
@@ -508,10 +505,11 @@
     border-color: rgba(76, 175, 80, 0.3);
 }
 
+/* Default tag chip: primary tint (card_tag_chips.dart fallback branch) */
 .wv-c-cat {
-    background: rgba(255, 255, 255, 0.07);
-    color: rgba(255, 255, 255, 0.85);
-    border-color: rgba(255, 255, 255, 0.08);
+    background: rgba(196, 42, 74, 0.15);
+    color: var(--wv-accent);
+    border-color: rgba(196, 42, 74, 0.2);
 }
 
 .wv-c-tag {

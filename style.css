@@ -1,21 +1,35 @@
-/* Weaver's Vault — Glaze Discover UI port (AGPL-3.0 upstream: github.com/hydall/Glaze).
-   Palette + glass recipe extracted from Glaze source:
-   - app bg #19191A (--app-bg), surfaces #1E1E1E (--ui-bg-default-rgb)
-   - accent #C42A4A, outline #2C2D2E
-   - glass controls: surface tint @ 0.8 opacity + 12px backdrop blur + accent@18% border
-   - catalog cards: opaque surface, radius 16, white@15% border,
-     shadow black 10% → 30% on hover with -4px lift / 1.01 scale (easeOutBack)
-   - chips: NSFW #FF4444@20%, SFW #4CAF50@20%, hashtags cyan #00CCCC@10% */
+/* Weaver's Vault — Glaze UI port (AGPL-3.0 upstream: github.com/hydall/Glaze).
+   Values extracted from source; see design/glaze-spec-filter-sheet.md and
+   design/glaze-spec-catalog.md for the cited widget lines.
+
+   Palette (default dark preset):
+   - app bg / surface #19191A; containers #1E1E1E; group cards #1D1D1D
+     (surface tint @0.8 pre-composited over the app bg)
+   - accent #C42A4A; onSurface #E1E3E6; onSurfaceVariant #B0B8C1
+   - outline #2C2D2E; outlineVariant rgba(255,255,255,.1)
+   - error #CF6679; NSFW red #FF4444; SFW green #4CAF50; hashtag cyan #00CCCC
+   Glass controls: tint @ 0.8 + 12px backdrop blur + accent @ 18% border
+   + 3% fractal noise. Cards: r16, white @ 15% border, hover lift -4px ×1.01
+   (300ms easeOutBack), press ×0.96. */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 #wv-root {
     --wv-bg: #19191A;
     --wv-ui: #1E1E1E;
+    --wv-card: #1D1D1D;
     --wv-accent: #C42A4A;
+    --wv-on: #E1E3E6;
+    --wv-on-var: #B0B8C1;
     --wv-outline: #2C2D2E;
+    --wv-ov: rgba(255, 255, 255, 0.1);
     --wv-glass: rgba(25, 25, 26, 0.8);
     --wv-glass-border: rgba(196, 42, 74, 0.18);
     --wv-card-border: rgba(255, 255, 255, 0.15);
-    --wv-muted: #828282;
+    --wv-nsfw: #FF4444;
+    --wv-sfw: #4CAF50;
+    --wv-cyan: #00CCCC;
+    --wv-error: #CF6679;
     position: fixed;
     inset: 0;
     z-index: 9998;
@@ -38,8 +52,8 @@
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
-    color: #f2f1f4;
-    padding: 14px 16px 40px;
+    color: var(--wv-on);
+    padding: 0 0 24px;
 }
 
 /* Glaze NoiseOverlay: 3% fractal noise over the app background */
@@ -68,24 +82,24 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Search bar: filled surface, radius 12, outline border, accent focus */
+/* Search strip (character_list_screen.dart): edge-to-edge #1E1E1E     */
+/* fill, 41px block, no borders, hairline divider below                */
 /* ------------------------------------------------------------------ */
 
 .wv-searchbar {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 10px;
     background: var(--wv-ui);
-    border: 1px solid var(--wv-outline);
-    border-radius: 12px;
-    height: 54px;
-    padding: 0 20px;
-    color: var(--wv-muted);
+    border-bottom: 1px solid var(--wv-ov);
+    height: 41px;
+    padding: 0 16px 0 16px;
+    color: var(--wv-accent);
     flex-shrink: 0;
 }
 
-.wv-searchbar:focus-within {
-    border-color: var(--wv-accent);
+.wv-searchbar .fa-magnifying-glass {
+    font-size: 18px;
 }
 
 .wv-search {
@@ -94,43 +108,43 @@
     border: 0;
     background: none;
     outline: none;
-    color: #f2f1f4;
-    font-size: 15px;
+    color: var(--wv-on);
+    font-size: 14px;
     font-family: inherit;
 }
 
 .wv-search::placeholder {
-    color: #7b7883;
+    color: var(--wv-on-var);
 }
 
 /* ------------------------------------------------------------------ */
-/* Glass controls: source pill, filter button, sort chip               */
+/* Controls row (catalog_controls.dart): 32px glass pills              */
 /* ------------------------------------------------------------------ */
 
 .wv-row2 {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin: 14px 0 4px;
+    padding: 12px 16px 0;
     flex-shrink: 0;
-    /* keep the controls row (and its dropdown menu) above the card grid */
+    /* keep the controls row (and its dropdown) above the card grid */
     z-index: 30;
 }
 
 .wv-glass {
     display: flex;
     align-items: center;
-    gap: 8px;
-    height: 34px;
-    border-radius: 17px;
+    gap: 6px;
+    height: 32px;
+    border-radius: 16px;
     background: var(--wv-glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--wv-glass-border);
-    color: #e6e4e8;
+    color: var(--wv-accent);
     font-size: 13px;
-    font-weight: 500;
-    padding: 0 12px;
+    font-weight: 600;
+    padding: 0 14px;
     transition: background 0.15s;
 }
 
@@ -139,20 +153,20 @@
 }
 
 .wv-srclogo {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: linear-gradient(135deg, #7b2d8e, #c73a63);
     display: grid;
     place-items: center;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 800;
     color: #fff;
+    margin-right: 1px;
 }
 
 .wv-dn {
-    font-size: 0.7em;
-    color: var(--wv-muted);
+    font-size: 14px;
 }
 
 .wv-right {
@@ -162,9 +176,9 @@
 
 .wv-iconbtn {
     position: relative;
-    width: 34px;
-    height: 34px;
-    border-radius: 17px;
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
     background: var(--wv-glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
@@ -172,9 +186,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 1px;
+    gap: 2px;
     color: var(--wv-accent);
-    font-size: 14px;
+    font-size: 15px;
     transition: background 0.15s;
 }
 
@@ -184,8 +198,8 @@
 
 .wv-badge {
     position: absolute;
-    top: -3px;
-    right: -3px;
+    top: -2px;
+    right: -2px;
     min-width: 16px;
     height: 16px;
     border-radius: 8px;
@@ -193,6 +207,7 @@
     color: #fff;
     font-size: 10px;
     font-weight: 700;
+    line-height: 1;
     display: grid;
     place-items: center;
     padding: 0 4px;
@@ -206,16 +221,19 @@
     position: relative;
 }
 
+/* Sort picker (Glaze desktop popup): 240px glass panel, r12 */
 .wv-menu {
     position: absolute;
     right: 0;
-    top: 42px;
-    background: var(--wv-ui);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    top: 40px;
+    background: var(--wv-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--wv-ov);
     border-radius: 12px;
-    padding: 6px;
-    min-width: 210px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    padding: 4px;
+    min-width: 240px;
+    box-shadow: 0 0 24px 1px rgba(0, 0, 0, 0.35);
     z-index: 40;
 }
 
@@ -230,14 +248,14 @@
     gap: 10px;
     width: 100%;
     text-align: left;
-    padding: 9px 12px;
+    padding: 9px 14px;
     border-radius: 8px;
-    font-size: 13px;
-    color: #d8d5dc;
+    font-size: 14px;
+    color: var(--wv-on);
 }
 
 .wv-menu button:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .wv-menu button.wv-on {
@@ -245,60 +263,84 @@
 }
 
 .wv-menu button.wv-on::after {
-    content: '✓';
+    content: '\2713';
     font-weight: 700;
 }
 
-/* Active-filter pill row (NSFW chip with ×) */
+/* Active-filter chips row (catalog_grid.dart _ActiveTagsRow):
+   28px chips, radius 16, 8px separators */
 .wv-row3 {
-    margin: 9px 0 2px;
-    min-height: 28px;
+    display: flex;
+    gap: 8px;
+    height: 28px;
+    padding: 12px 16px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
     flex-shrink: 0;
 }
 
-.wv-fpill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    height: 28px;
-    border-radius: 16px;
-    background: rgba(255, 68, 68, 0.2);
-    border: 1px solid rgba(255, 68, 68, 0.3);
-    color: #FF4444;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 0 11px;
-}
-
-.wv-fpill[hidden] {
+.wv-row3:empty {
     display: none;
 }
 
-.wv-fpill .wv-x {
-    font-weight: 400;
-    opacity: 0.85;
-}
-
-/* Results / status line */
-.wv-status {
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 12.5px;
-    margin: 7px 0 13px;
+.wv-fchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    border-radius: 16px;
+    background: rgba(196, 42, 74, 0.2);
+    border: 1px solid var(--wv-accent);
+    color: #fff;
+    font-size: 12px;
+    padding: 0 10px;
+    white-space: nowrap;
     flex-shrink: 0;
 }
 
+.wv-fchip-nsfw {
+    background: rgba(255, 68, 68, 0.2);
+    border-color: rgba(255, 68, 68, 0.3);
+    color: var(--wv-nsfw);
+}
+
+.wv-fchipx {
+    font-size: 10px;
+    opacity: 0.9;
+}
+
+/* Result count: chub hides the line (catalog_grid.dart) — errors still show */
+.wv-status {
+    color: var(--wv-on-var);
+    font-size: 11px;
+    padding: 6px 16px;
+    flex-shrink: 0;
+}
+
+.wv-status.wv-sronly {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
 .wv-status-error {
-    color: #cf6679;
+    color: var(--wv-error);
+    font-size: 13px;
+    padding: 32px 16px;
 }
 
 /* ------------------------------------------------------------------ */
-/* Card grid: Glaze catalog card                                       */
+/* Card grid: 212px column slots, 12px gaps, 16px gutters              */
 /* ------------------------------------------------------------------ */
 
 .wv-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 22px 12px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    padding: 0 16px;
 }
 
 .wv-card {
@@ -335,7 +377,7 @@
     display: block;
 }
 
-/* Bottom-half fade into the card surface (Glaze _BottomFade) */
+/* Bottom-half fade into the card surface (catalog_card _BottomFade) */
 .wv-art::after {
     content: '';
     position: absolute;
@@ -361,9 +403,9 @@
     display: grid;
 }
 
-/* NSFW blur (display choice; reveal per card) */
+/* NSFW blur (ImageFiltered sigma 16) */
 .wv-blur img {
-    filter: blur(14px);
+    filter: blur(16px);
     transform: scale(1.06);
 }
 
@@ -378,6 +420,7 @@
     background: rgba(0, 0, 0, 0.25);
 }
 
+/* Message badge: black@60%, r10, mail icon 12 white70, count 10/600 */
 .wv-chat {
     position: absolute;
     top: 8px;
@@ -399,6 +442,8 @@
     color: rgba(255, 255, 255, 0.7);
 }
 
+/* Info block: Padding(10, 0, 10, 12); 15/700 name, 11 creator, 11/600
+   tokens@50%, chips, 11/1.4 description@55% */
 .wv-info {
     padding: 10px 10px 12px;
 }
@@ -431,6 +476,7 @@
     margin-top: 2px;
 }
 
+/* CardTagChips: Wrap 4/4, r8, h8 v2 padding, 10/600 */
 .wv-chips {
     display: flex;
     flex-wrap: wrap;
@@ -452,13 +498,13 @@
 
 .wv-c-nsfw {
     background: rgba(255, 68, 68, 0.2);
-    color: #FF4444;
+    color: var(--wv-nsfw);
     border-color: rgba(255, 68, 68, 0.3);
 }
 
 .wv-c-sfw {
     background: rgba(76, 175, 80, 0.2);
-    color: #4CAF50;
+    color: var(--wv-sfw);
     border-color: rgba(76, 175, 80, 0.3);
 }
 
@@ -470,7 +516,7 @@
 
 .wv-c-tag {
     background: rgba(0, 255, 255, 0.1);
-    color: #00CCCC;
+    color: var(--wv-cyan);
     border-color: rgba(0, 255, 255, 0.2);
 }
 
@@ -498,17 +544,17 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Filter sheet (Glaze filter modal): surface bg, accent section labels */
+/* Filter sheet — floating window (glaze_sheet.dart desktop):          */
+/* width min(92vw, 640), height 85vh, r16, white@10% border,           */
+/* shadow black .5 blur 40 spread 4, 52px title bar, no dim            */
 /* ------------------------------------------------------------------ */
 
 .wv-filters-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(5, 4, 8, 0.55);
-    backdrop-filter: blur(3px);
     z-index: 60;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
     overflow: auto;
 }
@@ -518,85 +564,163 @@
 }
 
 .wv-modal {
-    background: var(--wv-ui);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--wv-bg);
+    border: 1px solid var(--wv-ov);
     border-radius: 16px;
-    width: min(820px, 94vw);
-    margin-top: 56px;
-    padding: 24px 28px 30px;
-    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.75);
-}
-
-.wv-mhead {
+    width: min(92vw, 640px);
+    height: min(85vh, 900px);
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    box-shadow: 0 0 40px 4px rgba(0, 0, 0, 0.5);
+    animation: wv-window-in 180ms cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+@keyframes wv-window-in {
+    from {
+        opacity: 0;
+        transform: scale(0.97);
+    }
+}
+
+.wv-sheetbar {
+    display: flex;
     align-items: center;
-    margin-bottom: 18px;
+    height: 52px;
+    padding: 0 8px 0 12px;
+    flex-shrink: 0;
 }
 
-.wv-mhead h2 {
-    font-size: 21px;
+.wv-sheettitle {
+    font-size: 17px;
     font-weight: 700;
-    margin: 0;
+    color: var(--wv-on);
+    flex: 1;
 }
 
-.wv-mclose {
-    font-size: 24px;
-    color: #b9b6bf;
-    width: 36px;
-    height: 36px;
+.wv-spacer {
+    flex: 1;
+}
+
+.wv-sheettitle + .wv-spacer {
+    flex: 0;
+}
+
+.wv-winbtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    color: var(--wv-on-var);
+    font-size: 15px;
+    display: grid;
+    place-items: center;
+}
+
+.wv-winbtn:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* Sheet body: ListView padding (0, 8, 0, 32); scrollbar 6px */
+.wv-sheetbody {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0 32px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+
+/* MenuGroup card: gutters 16/16/12, r20, #1D1D1D, outlineVariant border */
+.wv-mcard {
+    position: relative;
+    overflow: hidden;
+    margin: 0 16px 12px;
+    background: var(--wv-card);
+    border: 1px solid var(--wv-ov);
+    border-radius: 20px;
+}
+
+.wv-mcard:last-child {
+    margin-bottom: 0;
+}
+
+/* Accent-caps header: padding 16/16/8/4, 13 w700 uppercase accent ls .3 */
+.wv-mhead2 {
+    padding: 16px 16px 4px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    color: var(--wv-accent);
+}
+
+.wv-mhead2.wv-tagshead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 8px 4px 16px;
+}
+
+.wv-clearbtn {
+    color: var(--wv-accent);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 2px 8px;
+}
+
+.wv-clearbtn:hover {
+    background: rgba(196, 42, 74, 0.12);
     border-radius: 8px;
 }
 
-.wv-mclose:hover {
-    background: rgba(255, 255, 255, 0.06);
-}
-
-.wv-msection {
-    padding: 18px 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.wv-msection:first-of-type {
-    border-top: 0;
-    padding-top: 4px;
-}
-
-.wv-mlabel {
-    color: var(--wv-accent);
-    font-size: 12.5px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    margin-bottom: 14px;
-}
-
+/* MenuSwitchItem row: padding h16 v10, label 16/400 onSurfaceVariant,
+   divider outlineVariant between rows, switch right */
 .wv-mrow {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    font-size: 16px;
+    justify-content: space-between;
+    padding: 10px 16px;
 }
 
+.wv-mrow + .wv-mrow,
+.wv-mhead2 + .wv-mrow {
+    border-top: 0;
+}
+
+.wv-mcard > .wv-mrow + .wv-mrow {
+    border-top: 1px solid var(--wv-ov);
+}
+
+.wv-mlabel2 {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--wv-on-var);
+}
+
+/* GlazeSwitch (compact M3): track 44x28 r14, thumb 20.
+   On: thumb accent, track accent@50%. Off: thumb white, track onSurface@30%
+   with outlineVariant outline. Danger rows tint #FF5A5F. */
 .wv-switch {
     position: relative;
-    width: 46px;
-    height: 26px;
+    width: 44px;
+    height: 28px;
     display: inline-block;
     cursor: pointer;
+    flex-shrink: 0;
 }
 
 .wv-switch input {
     opacity: 0;
     width: 0;
     height: 0;
+    position: absolute;
 }
 
 .wv-knob {
     position: absolute;
     inset: 0;
     border-radius: 14px;
-    background: #3a393e;
-    transition: 0.15s;
+    background: rgba(225, 227, 230, 0.3);
+    border: 1px solid var(--wv-ov);
+    transition: 150ms;
 }
 
 .wv-knob::after {
@@ -608,128 +732,380 @@
     background: #fff;
     top: 3px;
     left: 3px;
-    transition: 0.15s;
+    transition: 150ms;
 }
 
 .wv-switch input:checked + .wv-knob {
-    background: var(--wv-accent);
+    background: rgba(196, 42, 74, 0.5);
+    border-color: transparent;
 }
 
 .wv-switch input:checked + .wv-knob::after {
-    left: 23px;
+    left: 20px;
+    background: var(--wv-accent);
 }
 
-.wv-toklabel {
-    font-size: 15.5px;
-    margin-bottom: 12px;
+.wv-switch input[data-danger]:checked + .wv-knob {
+    background: rgba(255, 90, 95, 0.5);
+}
+
+.wv-switch input[data-danger]:checked + .wv-knob::after {
+    background: #FF5A5F;
+}
+
+/* Range row (_RangeRow): title, 10px gap, two fields + '–' */
+.wv-rangerow {
+    padding: 10px 16px;
+}
+
+.wv-rangetitle {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--wv-on-var);
 }
 
 .wv-range {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 0;
+    margin-top: 10px;
 }
 
+.wv-dash {
+    color: var(--wv-on-var);
+    font-size: 16px;
+    padding: 0 10px;
+}
+
+/* _NumberField: filled #1E1E1E r12, border outline / accent on focus,
+   contentPadding h12 v11, 15px tabular; prefix Min/Max 13px */
 .wv-tinput {
     flex: 1;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    background: #1a1a1b;
+    background: var(--wv-ui);
     border: 1px solid var(--wv-outline);
     border-radius: 12px;
-    padding: 12px 16px;
+    padding: 11px 12px;
+    min-width: 0;
 }
 
 .wv-tinput:focus-within {
     border-color: var(--wv-accent);
 }
 
-.wv-tinput span {
-    color: var(--wv-muted);
-    font-size: 14px;
+.wv-prefix {
+    color: var(--wv-on-var);
+    font-size: 13px;
+    padding-right: 8px;
 }
 
 .wv-tinput input {
-    width: 120px;
+    flex: 1;
+    min-width: 0;
     border: 0;
     background: none;
     outline: none;
-    color: #f2f1f4;
-    font-size: 14.5px;
+    color: var(--wv-on);
+    font-size: 15px;
     text-align: right;
     font-family: inherit;
+    font-variant-numeric: tabular-nums;
 }
 
-.wv-dash {
-    color: var(--wv-muted);
+/* _NumberRow: label left, 96px field right, centered value */
+.wv-numrow .wv-numfield {
+    flex: 0 0 96px;
+    padding: 11px 12px;
+}
+
+.wv-numfield input {
+    text-align: center;
+}
+
+/* MenuCollapsibleSection: header h16 v14, label 16 (w400 closed / w600
+   open), chevron 24 accent open / muted closed, accent wash when open */
+.wv-collapse-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 14px 16px;
+    text-align: left;
+}
+
+.wv-collapse-label {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--wv-on-var);
+}
+
+.wv-collapse-chev {
+    font-size: 16px;
+    color: var(--wv-on-var);
+    transition: transform 150ms;
+}
+
+.wv-collapsible[data-open="true"] .wv-collapse-label {
+    font-weight: 600;
+    color: var(--wv-on);
+}
+
+.wv-collapsible[data-open="true"] .wv-collapse-chev {
+    color: var(--wv-accent);
+    transform: rotate(180deg);
+}
+
+.wv-wash {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 80px;
+    background: linear-gradient(rgba(196, 42, 74, 0.22), rgba(196, 42, 74, 0));
+    pointer-events: none;
+}
+
+.wv-collapsible[data-open="true"] .wv-wash {
+    display: block;
+}
+
+.wv-collapse-body {
+    position: relative;
+}
+
+.wv-collapse-body .wv-mrow {
+    border-top: 1px solid var(--wv-ov);
+}
+
+/* FilterTagPicker: content padding (16, 6, 16, 10); selected chips wrap
+   6/6 + 12 gap → search → 12 → grid */
+.wv-tagsbody {
+    padding: 6px 16px 10px;
+}
+
+.wv-selwrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.wv-selwrap[hidden] {
+    display: none;
 }
 
 .wv-tagsearch {
     display: flex;
     align-items: center;
-    gap: 12px;
-    background: #1a1a1b;
+    gap: 10px;
+    background: var(--wv-ui);
     border: 1px solid var(--wv-outline);
-    border-radius: 24px;
-    padding: 12px 18px;
-    color: var(--wv-muted);
-    margin-bottom: 16px;
+    border-radius: 12px;
+    padding: 12px 8px 12px 12px;
+    color: var(--wv-on-var);
 }
 
 .wv-tagsearch:focus-within {
     border-color: var(--wv-accent);
 }
 
+.wv-tagsearch .fa-magnifying-glass {
+    font-size: 15px;
+}
+
 .wv-tagsearch input {
     flex: 1;
+    min-width: 0;
     border: 0;
     background: none;
     outline: none;
-    color: #f2f1f4;
-    font-size: 14.5px;
+    color: var(--wv-on);
+    font-size: 15px;
     font-family: inherit;
+}
+
+.wv-tagsearch input::placeholder {
+    color: var(--wv-on-var);
+}
+
+.wv-tagclear {
+    color: var(--wv-on-var);
+    font-size: 14px;
+    padding: 2px 6px;
 }
 
 .wv-tagcloud {
     display: flex;
     flex-wrap: wrap;
-    gap: 9px;
+    gap: 6px;
+    margin-top: 12px;
+    min-height: 20px;
 }
 
-.wv-taghint {
-    color: var(--wv-muted);
-    font-size: 13px;
-}
-
+/* FilterTagChip: stadium; unselected onSurface@5% / outlineVariant border /
+   onSurfaceVariant text; selected primary@22% / primary@70% / onSurface */
 .wv-tchip {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: #e2e0e5;
-    border-radius: 10px;
-    padding: 8px 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    background: rgba(225, 227, 230, 0.05);
+    border: 1px solid var(--wv-ov);
+    color: var(--wv-on-var);
+    padding: 6px 12px;
     font-size: 13px;
-    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wv-tchip:hover {
+    background: rgba(225, 227, 230, 0.09);
 }
 
 .wv-tchip.wv-sel {
-    background: rgba(196, 42, 74, 0.2);
-    border-color: rgba(196, 42, 74, 0.5);
-    color: #ff7d94;
+    background: rgba(196, 42, 74, 0.22);
+    border-color: rgba(196, 42, 74, 0.7);
+    color: var(--wv-on);
+    padding-right: 8px;
 }
 
-.wv-showall {
+.wv-chipx {
+    font-size: 11px;
+}
+
+.wv-tchip.wv-addraw {
+    padding-left: 8px;
+}
+
+.wv-tchip.wv-addraw .fa-plus {
+    font-size: 13px;
     color: var(--wv-accent);
-    font-size: 14px;
-    font-weight: 600;
-    margin-top: 16px;
+}
+
+.wv-taghint {
+    color: var(--wv-on-var);
+    font-size: 13px;
+    padding: 6px 0;
+}
+
+.wv-tagloading {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+}
+
+.wv-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(196, 42, 74, 0.12);
+    border-top-color: var(--wv-accent);
+    border-radius: 50%;
+    animation: wv-spin 1.6s linear infinite;
+}
+
+@keyframes wv-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Show all (N) / Show less: TextButton primary 13/600, chevron 18 */
+.wv-showall {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
+    color: var(--wv-accent);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 4px 0;
+}
+
+.wv-showall .fa-solid {
+    font-size: 14px;
+}
+
+.wv-showall[hidden] {
+    display: none;
+}
+
+/* NSFL warning sub-sheet (GlazeBottomSheet desktop): content-sized window
+   r16, black@50% blur 40 spread 4; head 18/700; big info icon 64@50%;
+   item rows white@6% r16 h16 v14, 16px labels, destructive #FF4444 */
+.wv-subsheet-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: rgba(0, 0, 0, 0.32);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.wv-subsheet {
+    width: min(92vw, 420px);
+    background: var(--wv-bg);
+    border: 1px solid var(--wv-ov);
+    border-radius: 16px;
+    box-shadow: 0 0 40px 4px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.wv-subsheet-head {
+    padding: 20px 20px 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--wv-on);
+}
+
+.wv-biginfo {
+    padding: 12px 20px 20px;
+    text-align: center;
+}
+
+.wv-biginfo-icon {
+    font-size: 56px;
+    color: rgba(176, 184, 193, 0.5);
+}
+
+.wv-biginfo p {
+    margin: 16px 0 0;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--wv-on);
+}
+
+.wv-sheetitems {
+    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wv-sheetitem {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--wv-ov);
+    border-radius: 16px;
+    padding: 14px 16px;
+    font-size: 16px;
+    color: var(--wv-on);
+    text-align: center;
+}
+
+.wv-sheetitem:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.wv-sheetitem.wv-danger {
+    color: var(--wv-nsfw);
 }
 
 /* ------------------------------------------------------------------ */
-/* Detail popup (M3) — restyled to the Glaze palette                   */
+/* Detail popup (M3) — same palette                                    */
 /* ------------------------------------------------------------------ */
 
 .wv-detail {
@@ -749,38 +1125,35 @@
     display: none;
 }
 
-.wv-detail > .wv-detail-body {
-    background: var(--wv-ui);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    padding: 24px;
+.wv-detail-head,
+.wv-detail-head + .wv-detail-body {
+    background: var(--wv-card);
+    border: 1px solid var(--wv-ov);
     width: min(720px, 100%);
+    align-self: center;
 }
 
 .wv-detail-head {
-    position: relative;
     display: flex;
     gap: 14px;
     align-items: flex-start;
-    background: var(--wv-ui);
-    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px 16px 0 0;
     border-bottom: 0;
     padding: 16px;
+    position: relative;
 }
 
-.wv-detail > .wv-detail-head + .wv-detail-body,
-.wv-detail-head + .wv-detail-body {
+.wv-detail > .wv-detail-head + .wv-detail-body {
     border-radius: 0 0 16px 16px;
-    margin-top: 0;
-    width: min(720px, 100%);
+    border-top: 0;
 }
 
-.wv-detail-head,
-.wv-detail-head + .wv-detail-body,
-.wv-detail-actions {
+.wv-detail-body {
+    background: var(--wv-card);
+    border: 1px solid var(--wv-ov);
+    border-radius: 16px;
+    padding: 24px;
     width: min(720px, 100%);
-    align-self: center;
 }
 
 .wv-detail-poster {
@@ -803,7 +1176,7 @@
 }
 
 .wv-detail-sub {
-    color: var(--wv-muted);
+    color: var(--wv-on-var);
     font-size: 12.5px;
     margin-top: 3px;
 }
@@ -819,7 +1192,7 @@
     position: absolute;
     top: 10px;
     right: 10px;
-    color: #b9b6bf;
+    color: var(--wv-on-var);
     font-size: 18px;
 }
 
@@ -832,11 +1205,11 @@
 
 .wv-detail-body h4 {
     color: var(--wv-accent);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.77px;
     text-transform: uppercase;
-    margin: 16px 0 6px;
+    margin: 24px 0 4px;
 }
 
 .wv-detail-body h4:first-child {
@@ -852,6 +1225,8 @@
     justify-content: flex-end;
     gap: 10px;
     padding: 14px 0;
+    width: min(720px, 100%);
+    align-self: center;
 }
 
 .wv-detail-actions a,
@@ -866,12 +1241,28 @@
 .wv-detail-source {
     background: var(--wv-glass);
     border: 1px solid var(--wv-glass-border);
-    color: #e6e4e8;
+    color: var(--wv-on);
 }
 
+/* GlazeFab: height 56 stadium, primary fill, white@18% border, label 15/700,
+   shadows black .55 blur 28 + accent .4 blur 24 */
 .wv-import-button {
+    height: 56px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
     background: var(--wv-accent);
     color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 28px;
+    padding: 0 22px 0 18px;
+    font-size: 15px;
+    font-weight: 700;
+    box-shadow: 0 10px 28px 2px rgba(0, 0, 0, 0.55), 0 4px 24px 0 rgba(196, 42, 74, 0.4);
+}
+
+.wv-detail-actions {
+    position: relative;
 }
 
 /* Import-mode sheet (Glaze options sheet) */
@@ -881,8 +1272,8 @@
     left: 50%;
     transform: translateX(-50%);
     width: min(340px, 90%);
-    background: var(--wv-ui);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--wv-card);
+    border: 1px solid var(--wv-ov);
     border-radius: 14px;
     padding: 14px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
@@ -904,7 +1295,7 @@
     background: var(--wv-glass);
     border: 1px solid var(--wv-glass-border);
     border-radius: 10px;
-    color: #e6e4e8;
+    color: var(--wv-on);
     padding: 10px;
     font-size: 13.5px;
     font-weight: 600;
@@ -915,32 +1306,30 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Responsive (panel mirrors the mockup breakpoints)                   */
+/* Responsive                                                          */
 /* ------------------------------------------------------------------ */
 
-@media (max-width: 1100px) {
-    .wv-grid {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 850px) {
-    .wv-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-}
-
 @media (max-width: 620px) {
-    .wv-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 16px 10px;
+    .wv-panel {
+        padding-bottom: 14px;
+    }
+
+    .wv-modal {
+        height: 92vh;
     }
 
     .wv-syn {
         display: none;
     }
+}
 
-    .wv-panel {
-        padding: 10px 10px 30px;
+@media (prefers-reduced-motion: reduce) {
+    .wv-card,
+    .wv-modal,
+    .wv-knob,
+    .wv-knob::after,
+    .wv-collapse-chev {
+        transition: none !important;
+        animation: none !important;
     }
 }

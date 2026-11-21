@@ -1,9 +1,16 @@
 // Weaver's Vault — character library extension.
-// Browse UI ported from Glaze's Discover tab (AGPL-3.0, github.com/hydall/Glaze):
-// glass controls (surface @ 0.8 + 12px backdrop blur + accent@18% border),
-// #19191A app bg / #1E1E1E surfaces / #C42A4A accent, catalog card with
-// white@15% border + lift-on-hover, text chips, filter sheet, epoch guard.
-// Source-adapter logic likewise ported from Glaze — see docs/ in the vault repo.
+// Browse UI + filter sheet ported from Glaze (AGPL-3.0, github.com/hydall/Glaze).
+// Pixel specs extracted widget-by-widget from the Glaze source (see design/):
+//   glaze-spec-filter-sheet.md — filter sheet: floating window (52px title bar,
+//     ≤640 wide, 85% height), MenuGroup cards (#1D1D1D r20, accent-caps header
+//     13/w700/ls0.3), MenuSwitchItem rows (16px label, compact M3 switch),
+//     range/number fields (r12 #1E1E1E, 15px tabular), FilterTagPicker
+//     (stadium chips, selected row above search, fold at 24 + 6, "Show all"),
+//     filters commit on close (dispose diff), NSFL gated behind a warning.
+//   glaze-spec-catalog.md — browse screen: controls row (32px glass pills,
+//     accent 13/w600 label, 18px icons), active-filter chips row (28px),
+//     cards (2/3 art, white@15% border, hover lift, Glaze chip colors),
+//     212px grid slots, chub hides the result-count line.
 import { extension_settings } from '../../extensions.js';
 import { getRequestHeaders, characters, getCharacters, importCharacter } from '../../../script.js';
 import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldInfo } from '../../world-info.js';
@@ -12,13 +19,13 @@ const extensionName = "Weaver's Vault";
 const MODULE = 'weavers-vault';
 
 const DEFAULTS = {
-    nsfw: false,          // "Show NSFW" content filter (Glaze filter sheet)
+    nsfw: false,          // committed content filter (applies when the sheet closes)
     sort: 'popular',
     query: '',
     perPage: 24,
     openAfterImport: true,
     filters: {},          // per-source filter profiles (keyed by source id)
-    ledger: [],           // import ledger (Q4): {source, id, name, what, at, url}
+    ledger: [],           // import ledger (Q4): {source, id, name, at, url}
     favorites: [],        // {source, id, name}
 };
 
@@ -31,13 +38,34 @@ function settings() {
     return s;
 }
 
-function chubFilters() {
+// Glaze CatalogFilters defaults (catalog_models.dart): min 29 / max 100000.
+const FILTER_DEFAULTS = {
+    nsfw: false,
+    nsfwOnly: false,
+    minTokens: 29,
+    maxTokens: 100000,
+    minAiRating: 0,
+    minTags: 0,
+    requireImages: false,
+    requireLore: false,
+    requireCustomPrompt: false,
+    requireExampleDialogues: false,
+    requireAlternateGreetings: false,
+    recommendedVerified: false,
+    inclusiveOr: false,
+    tagNames: [],        // selected tag names (chub topics are name-based)
+};
+
+function committedFilters() {
     const s = settings();
     s.filters.chub = s.filters.chub ?? {};
     const f = s.filters.chub;
-    f.minTokens = Number(f.minTokens) || null;
-    f.maxTokens = Number(f.maxTokens) || null;
-    f.topics = Array.isArray(f.topics) ? f.topics : [];
+    for (const [k, v] of Object.entries(FILTER_DEFAULTS)) {
+        if (f[k] === undefined) f[k] = structuredClone(v);
+    }
+    f.tagNames = Array.isArray(f.tagNames) ? f.tagNames : [];
+    f.minTokens = Number(f.minTokens) || 29;
+    f.maxTokens = Number(f.maxTokens) || 100000;
     return f;
 }
 
@@ -46,8 +74,8 @@ function saveSettingsQuiet() {
     import('../../../script.js').then(m => m.saveSettingsDebounced());
 }
 
-// Glaze colors its tag chips with small emoji markers (category chips keep the
-// colored glyph, custom/hashtag chips render cyan). Map the common chub topics.
+// Emoji markers on tag chips (the shipped Glaze renders colored glyphs on
+// category chips; hashtag chips render cyan without one).
 const TAG_EMOJI = [
     ['angst', '💔'], ['fluff', '🧸'], ['smut', '💋'], ['comedy', '😂'],
     ['dominant', '⛓️'], ['submissive', '🧎'], ['dead dove', '🕊️'], ['game', '🎮'],
@@ -83,6 +111,26 @@ const SORT_LABELS = {
     updated: 'Recently updated',
 };
 
+const REQUIRE_ROWS = [
+    ['requireImages', 'With gallery images'],
+    ['requireLore', 'With lorebooks'],
+    ['requireCustomPrompt', 'With custom prompt'],
+    ['requireExampleDialogues', 'With example dialogues'],
+    ['requireAlternateGreetings', 'With alternate greetings'],
+];
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function switchRowHtml(key, label) {
+    return `
+        <div class="wv-mrow">
+            <span class="wv-mlabel2">${escapeHtml(label)}</span>
+            <label class="wv-switch"><input type="checkbox" data-filter="${key}" /><span class="wv-knob"></span></label>
+        </div>`;
+}
+
 // ---------------------------------------------------------------------------
 // Overlay shell (proven RPG-engine pattern: fullscreen DOM overlay, no iframe)
 // ---------------------------------------------------------------------------
@@ -103,11 +151,11 @@ function ensureOverlay() {
             </div>
             <div class="wv-row2">
                 <button class="wv-glass wv-source" title="Source (more coming in v2)">
-                    <span class="wv-srclogo">C</span>Chub<span class="fa-solid fa-chevron-down wv-dn"></span>
+                    <span class="wv-srclogo">C</span><span class="wv-srclabel">Chub</span><span class="fa-solid fa-chevron-down wv-dn"></span>
                 </button>
                 <div class="wv-right">
                     <button class="wv-iconbtn wv-filterbtn" title="Filters" aria-label="Filters">
-                        <span class="fa-solid fa-filter"></span>
+                        <span class="fa-solid fa-filter-list"></span>
                         <span class="wv-badge" hidden></span>
                     </button>
                     <div class="wv-sortwrap">
@@ -119,44 +167,75 @@ function ensureOverlay() {
                     </div>
                 </div>
             </div>
-            <div class="wv-row3">
-                <button class="wv-fpill wv-nsfw-chip" hidden>NSFW <span class="wv-x">×</span></button>
-            </div>
+            <div class="wv-row3"></div>
             <div class="wv-status"></div>
             <div class="wv-grid"></div>
             <div class="wv-endbar"></div>
             <div class="wv-sentinel"></div>
             <div class="wv-detail" hidden></div>
+
             <div class="wv-filters-overlay" hidden>
-                <div class="wv-modal" role="dialog" aria-label="Filters">
-                    <div class="wv-mhead">
-                        <h2>Filters</h2>
-                        <button class="wv-mclose" aria-label="Close filters">×</button>
+                <div class="wv-modal">
+                    <div class="wv-sheetbar">
+                        <span class="wv-sheettitle">Filters</span>
+                        <span class="wv-spacer"></span>
+                        <button class="wv-winbtn" data-win="max" title="Maximize (visual only)" aria-label="Maximize"><span class="fa-regular fa-square"></span></button>
+                        <button class="wv-winbtn wv-mclose" title="Close" aria-label="Close filters"><span class="fa-solid fa-xmark"></span></button>
                     </div>
-                    <div class="wv-msection">
-                        <div class="wv-mlabel">CONTENT</div>
-                        <div class="wv-mrow">
-                            <span>Show NSFW</span>
-                            <label class="wv-switch"><input type="checkbox" class="wv-nsfw" /><span class="wv-knob"></span></label>
-                        </div>
-                    </div>
-                    <div class="wv-msection">
-                        <div class="wv-mlabel">CARD</div>
-                        <div class="wv-toklabel">Token Range</div>
-                        <div class="wv-range">
-                            <div class="wv-tinput"><span>Min</span><input type="text" inputmode="numeric" class="wv-mintok" placeholder="0" /></div>
-                            <span class="wv-dash">-</span>
-                            <div class="wv-tinput"><span>Max</span><input type="text" inputmode="numeric" class="wv-maxtok" placeholder="100000" /></div>
-                        </div>
-                    </div>
-                    <div class="wv-msection">
-                        <div class="wv-mlabel">TAGS</div>
-                        <div class="wv-tagsearch">
-                            <span class="fa-solid fa-magnifying-glass"></span>
-                            <input type="text" class="wv-tagfilter" placeholder="Search tags..." spellcheck="false" />
-                        </div>
-                        <div class="wv-tagcloud"></div>
-                        <button class="wv-showall">⌄ Show all (<span class="wv-tagcount">0</span>)</button>
+                    <div class="wv-sheetbody">
+                        <section class="wv-mcard">
+                            <div class="wv-mhead2">Content</div>
+                            ${switchRowHtml('nsfw', 'Show NSFW')}
+                            ${switchRowHtml('nsfl', 'Show NSFL')}
+                            ${switchRowHtml('nsfwOnly', 'NSFW only')}
+                        </section>
+                        <section class="wv-mcard">
+                            <div class="wv-mhead2">Card</div>
+                            <div class="wv-rangerow">
+                                <div class="wv-rangetitle">Token Range</div>
+                                <div class="wv-range">
+                                    <div class="wv-tinput"><span class="wv-prefix">Min</span><input type="text" inputmode="numeric" class="wv-mintok" placeholder="0" /></div>
+                                    <span class="wv-dash">–</span>
+                                    <div class="wv-tinput"><span class="wv-prefix">Max</span><input type="text" inputmode="numeric" class="wv-maxtok" placeholder="100000" /></div>
+                                </div>
+                            </div>
+                            <div class="wv-mrow wv-numrow">
+                                <span class="wv-mlabel2">Minimum AI rating</span>
+                                <div class="wv-tinput wv-numfield"><input type="text" inputmode="numeric" class="wv-minair" placeholder="0" /></div>
+                            </div>
+                            <div class="wv-mrow wv-numrow">
+                                <span class="wv-mlabel2">Minimum tag count</span>
+                                <div class="wv-tinput wv-numfield"><input type="text" inputmode="numeric" class="wv-mintags" placeholder="0" /></div>
+                            </div>
+                        </section>
+                        <section class="wv-mcard wv-collapsible" data-open="false">
+                            <div class="wv-wash"></div>
+                            <button class="wv-collapse-head">
+                                <span class="wv-collapse-label">Must include</span>
+                                <span class="fa-solid fa-chevron-down wv-collapse-chev"></span>
+                            </button>
+                            <div class="wv-collapse-body" hidden>
+                                ${REQUIRE_ROWS.map(([k, label]) => switchRowHtml(k, label)).join('')}
+                            </div>
+                        </section>
+                        <section class="wv-mcard">
+                            <div class="wv-mhead2">Other</div>
+                            ${switchRowHtml('recommendedVerified', 'Recommended / verified')}
+                        </section>
+                        <section class="wv-mcard">
+                            <div class="wv-mhead2 wv-tagshead"><span>Tags</span><button class="wv-clearbtn" hidden></button></div>
+                            ${switchRowHtml('inclusiveOr', 'Match any tag')}
+                            <div class="wv-tagsbody">
+                                <div class="wv-selwrap" hidden></div>
+                                <div class="wv-tagsearch">
+                                    <span class="fa-solid fa-magnifying-glass"></span>
+                                    <input type="text" class="wv-tagfilter" placeholder="Search tags..." spellcheck="false" />
+                                    <button class="wv-tagclear" hidden><span class="fa-solid fa-xmark"></span></button>
+                                </div>
+                                <div class="wv-tagcloud"></div>
+                                <button class="wv-showall" hidden></button>
+                            </div>
+                        </section>
                     </div>
                 </div>
             </div>
@@ -171,7 +250,7 @@ function ensureOverlay() {
 function onKeydown(e) {
     if (!root || root.hidden || e.key !== 'Escape') return;
     const overlay = root.querySelector('.wv-filters-overlay');
-    if (!overlay.hidden) { overlay.hidden = true; return; }
+    if (!overlay.hidden) { closeFilterSheet(); return; }
     closeVault();
 }
 
@@ -179,13 +258,11 @@ function openVault() {
     ensureOverlay();
     root.hidden = false;
     const s = settings();
-    const f = chubFilters();
+    const f = committedFilters();
     state.query = s.query;
     state.sort = s.sort;
-    state.nsfw = s.nsfw;
-    state.topics = new Set(f.topics);
-    state.minTok = f.minTokens;
-    state.maxTok = f.maxTokens;
+    state.filters = { ...f, tags: new Set(f.tagNames) };
+    state.nsfw = f.nsfw;
     root.querySelector('.wv-search').value = s.query;
     hydrateControls();
     if (!state.hydrated) {
@@ -208,12 +285,13 @@ const state = {
     epoch: 0,
     query: '',
     sort: 'popular',
-    nsfw: false,
-    topics: new Set(),
-    minTok: null,
-    maxTok: null,
-    tagCloud: null,      // lazily fetched tag index for the filter sheet
+    filters: null,       // committed filter model (Glaze CatalogFilters mirror)
+    tagCloud: null,      // full tag index for the filter sheet (loaded lazily)
     tagCloudLoading: false,
+    tagQuery: '',
+    tagSuggestions: [],
+    tagSuggestionsLoading: false,
+    tagExpanded: false,
     page: 0,
     items: [],
     total: 0,
@@ -231,8 +309,22 @@ function resetAndSearch() {
     runSearch();
 }
 
+// Glaze badge count (catalog_controls.dart): nsfw + tags + token bounds ≠
+// defaults + the chub-only flags.
 function activeFilterCount() {
-    return (state.nsfw ? 1 : 0) + state.topics.size + ((state.minTok || state.maxTok) ? 1 : 0);
+    const f = state.filters;
+    if (!f) return 0;
+    let n = 0;
+    if (f.nsfw) n++;
+    if (f.nsfwOnly) n++;
+    if (f.minTokens !== FILTER_DEFAULTS.minTokens || f.maxTokens !== FILTER_DEFAULTS.maxTokens) n++;
+    if (f.minAiRating > 0) n++;
+    if (f.minTags > 0) n++;
+    for (const [key] of REQUIRE_ROWS) if (f[key]) n++;
+    if (f.recommendedVerified) n++;
+    if (f.inclusiveOr && f.tags.size) n++;
+    n += f.tags.size;
+    return n;
 }
 
 function runSearch() {
@@ -240,6 +332,7 @@ function runSearch() {
     state.loading = true;
     state.page = state.page || 1;
     renderStatus('Searching…');
+    const f = state.filters ?? { ...committedFilters(), tags: new Set() };
     fetch('/api/weavers-vault/chub/search', {
         method: 'POST',
         headers: getRequestHeaders(),
@@ -248,11 +341,23 @@ function runSearch() {
             page: state.page,
             limit: settings().perPage,
             sort: state.sort,
-            nsfw: state.nsfw,
+            nsfw: f.nsfw,
             nsfl: false, // account-scoped on chub; v2 alongside the chub key
-            topics: [...state.topics],
-            minTokens: state.minTok || 0,
-            maxTokens: state.maxTok || 100000,
+            topics: [...f.tags],
+            minTokens: f.minTokens,
+            maxTokens: f.maxTokens,
+            flags: {
+                nsfwOnly: f.nsfwOnly,
+                requireImages: f.requireImages,
+                requireLore: f.requireLore,
+                requireCustomPrompt: f.requireCustomPrompt,
+                requireExampleDialogues: f.requireExampleDialogues,
+                requireAlternateGreetings: f.requireAlternateGreetings,
+                recommendedVerified: f.recommendedVerified,
+                inclusiveOr: f.inclusiveOr,
+                minAiRating: f.minAiRating,
+                minTags: f.minTags,
+            },
         }),
     })
         .then(r => r.json().then(body => ({ ok: r.ok, status: r.status, body })))
@@ -292,19 +397,18 @@ function loadMore() {
 function renderStatus(text, isError = false) {
     const el = root.querySelector('.wv-status');
     el.classList.toggle('wv-status-error', isError);
-    if (text) {
+    // Chub hides the result-count line (catalog_grid.dart:136-137): errors
+    // still show, counts stay in the DOM for screen readers only.
+    if (text && isError) {
         el.textContent = text;
+        el.classList.remove('wv-sronly');
         el.hidden = false;
         return;
     }
-    // Glaze: result count line + "End of results" footer at the grid's end.
-    if (state.reachedEnd) {
-        el.textContent = state.items.length
-            ? `${state.items.length}${state.total ? ` of ${state.total}` : ''} results`
-            : 'No results';
-    } else {
-        el.textContent = `${state.items.length}${state.total ? ` of ${state.total}` : ''} results`;
-    }
+    el.classList.add('wv-sronly');
+    el.textContent = text || (state.reachedEnd
+        ? (state.items.length ? `${state.items.length}${state.total ? ` of ${state.total}` : ''} results` : 'No results')
+        : `${state.items.length}${state.total ? ` of ${state.total}` : ''} results`);
     el.hidden = false;
 }
 
@@ -325,10 +429,11 @@ function chipHtml(tag) {
 function renderGrid() {
     const grid = root.querySelector('.wv-grid');
     grid.innerHTML = '';
+    const nsfwOn = state.filters?.nsfw;
     for (const item of state.items) {
         const card = document.createElement('article');
         card.className = 'wv-card';
-        const blur = item.nsfw && !state.nsfw;
+        const blur = item.nsfw && !nsfwOn;
         const tags = item.tags ?? [];
         const chips = [
             `<span class="wv-chip ${item.nsfw ? 'wv-c-nsfw' : 'wv-c-sfw'}">${item.nsfw ? 'NSFW' : 'SFW'}</span>`,
@@ -374,8 +479,43 @@ function renderGrid() {
     endbar.textContent = state.reachedEnd && state.items.length ? 'End of results' : '';
 }
 
+// Active-filter chips row (Glaze _ActiveTagsRow): 28px horizontal chips.
+// NSFW red; selected tags accent-tinted; each chip removes its filter.
+function renderActiveChips() {
+    const row = root.querySelector('.wv-row3');
+    const f = state.filters;
+    if (!f) { row.innerHTML = ''; return; }
+    const chips = [];
+    if (f.nsfw) chips.push(`<button class="wv-fchip wv-fchip-nsfw" data-clear="nsfw">NSFW <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    if (f.nsfwOnly) chips.push(`<button class="wv-fchip" data-clear="nsfwOnly">NSFW only <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    if (f.minTokens !== FILTER_DEFAULTS.minTokens || f.maxTokens !== FILTER_DEFAULTS.maxTokens) {
+        chips.push(`<button class="wv-fchip" data-clear="tokens">${f.minTokens}–${f.maxTokens} tokens <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    }
+    if (f.minAiRating > 0) chips.push(`<button class="wv-fchip" data-clear="minAiRating">AI rating ≥ ${f.minAiRating} <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    if (f.minTags > 0) chips.push(`<button class="wv-fchip" data-clear="minTags">Tags ≥ ${f.minTags} <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    for (const [key, label] of REQUIRE_ROWS) {
+        if (f[key]) chips.push(`<button class="wv-fchip" data-clear="${key}">${label} <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    }
+    if (f.recommendedVerified) chips.push(`<button class="wv-fchip" data-clear="recommendedVerified">Recommended / verified <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    for (const tag of f.tags) {
+        chips.push(`<button class="wv-fchip" data-tag="${escapeHtml(tag)}">${tagEmoji(tag)} ${escapeHtml(tag)} <span class="fa-solid fa-xmark wv-fchipx"></span></button>`);
+    }
+    row.innerHTML = chips.join('');
+    row.querySelectorAll('.wv-fchip').forEach(b => b.addEventListener('click', () => {
+        if (b.dataset.clear) {
+            const key = b.dataset.clear;
+            if (key === 'tokens') { state.filters.minTokens = FILTER_DEFAULTS.minTokens; state.filters.maxTokens = FILTER_DEFAULTS.maxTokens; }
+            else state.filters[key] = false;
+        } else if (b.dataset.tag) {
+            state.filters.tags.delete(b.dataset.tag);
+        }
+        commitFilters();
+        resetAndSearch();
+    }));
+}
+
 // ---------------------------------------------------------------------------
-// Toolbar wiring (glass controls, sort menu, filter sheet)
+// Toolbar wiring (glass controls, sort menu)
 // ---------------------------------------------------------------------------
 
 function hydrateControls() {
@@ -383,14 +523,10 @@ function hydrateControls() {
     const n = activeFilterCount();
     badge.hidden = n === 0;
     badge.textContent = n;
-    root.querySelector('.wv-nsfw-chip').hidden = !state.nsfw;
-    root.querySelector('.wv-nsfw').checked = state.nsfw;
-    root.querySelector('.wv-mintok').value = state.minTok ?? '';
-    root.querySelector('.wv-maxtok').value = state.maxTok ?? '';
+    renderActiveChips();
     const sortIcon = root.querySelector('.wv-sorticon');
     sortIcon.className = `${SORT_ICONS[state.sort] ?? 'fa-solid fa-sort'} wv-sorticon`;
     renderSortMenu();
-    renderTagCloud();
 }
 
 function renderSortMenu() {
@@ -407,41 +543,6 @@ function renderSortMenu() {
     }));
 }
 
-function renderTagCloud() {
-    const cloud = root.querySelector('.wv-tagcloud');
-    const selected = state.topics;
-    if (!state.tagCloud) {
-        cloud.innerHTML = state.tagCloudLoading
-            ? '<span class="wv-taghint">Loading tags…</span>'
-            : '<span class="wv-taghint">Open the vault once with the filter sheet to load the tag index.</span>';
-        root.querySelector('.wv-tagcount').textContent = state.tagCloud?.length ?? 0;
-        return;
-    }
-    const query = (root.querySelector('.wv-tagfilter').value || '').toLowerCase();
-    cloud.innerHTML = state.tagCloud
-        .filter(t => !query || t.name.toLowerCase().includes(query))
-        .map(t => `<button class="wv-tchip ${selected.has(t.name) ? 'wv-sel' : ''}" data-tag="${escapeHtml(t.name)}">${tagEmoji(t.name)} ${escapeHtml(t.name)}</button>`)
-        .join('');
-    root.querySelector('.wv-tagcount').textContent = state.tagCloud.length;
-    cloud.querySelectorAll('.wv-tchip').forEach(b => b.addEventListener('click', () => {
-        const tag = b.dataset.tag;
-        if (state.topics.has(tag)) state.topics.delete(tag); else state.topics.add(tag);
-        b.classList.toggle('wv-sel');
-        persistFilters();
-        hydrateControls();
-        resetAndSearch();
-    }));
-}
-
-function persistFilters() {
-    const f = chubFilters();
-    f.topics = [...state.topics];
-    f.minTokens = state.minTok;
-    f.maxTokens = state.maxTok;
-    settings().nsfw = state.nsfw;
-    saveSettingsQuiet();
-}
-
 function wireToolbar() {
     const search = root.querySelector('.wv-search');
     search.addEventListener('input', () => {
@@ -452,7 +553,7 @@ function wireToolbar() {
         searchTimer = setTimeout(resetAndSearch, 400); // Glaze's debounce cadence
     });
 
-    // Sort menu (glass chip → picker, Glaze sortIconChip)
+    // Sort menu (glass chip → desktop popup, Glaze sortIconChip)
     root.querySelector('.wv-sortbtn').addEventListener('click', e => {
         e.stopPropagation();
         const menu = root.querySelector('.wv-menu');
@@ -463,66 +564,330 @@ function wireToolbar() {
         if (menu && !menu.hidden && !menu.contains(e.target)) menu.hidden = true;
     });
 
-    // NSFW chip (active-filter pill with ×)
-    root.querySelector('.wv-nsfw-chip').addEventListener('click', e => {
-        state.nsfw = e.target.classList.contains('wv-x') ? false : !state.nsfw;
-        persistFilters();
-        hydrateControls();
-        resetAndSearch();
+    // Filter sheet (floating window; filters commit on close, like Glaze)
+    const overlay = root.querySelector('.wv-filters-overlay');
+    root.querySelector('.wv-filterbtn').addEventListener('click', () => openFilterSheet());
+    root.querySelector('.wv-mclose').addEventListener('click', () => closeFilterSheet());
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeFilterSheet(); });
+
+    // Collapsible "Must include" group (Glaze MenuCollapsibleSection)
+    root.querySelector('.wv-collapse-head').addEventListener('click', () => {
+        const card = root.querySelector('.wv-collapsible');
+        const open = card.dataset.open === 'true';
+        card.dataset.open = String(!open);
+        card.querySelector('.wv-collapse-body').hidden = open;
     });
 
-    // Filter sheet
-    const overlay = root.querySelector('.wv-filters-overlay');
-    root.querySelector('.wv-filterbtn').addEventListener('click', () => {
-        overlay.hidden = false;
-        ensureTagCloud();
-    });
-    root.querySelector('.wv-mclose').addEventListener('click', () => { overlay.hidden = true; });
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
-    root.querySelector('.wv-nsfw').addEventListener('change', e => {
-        state.nsfw = e.target.checked;
-        persistFilters();
-        hydrateControls();
-        resetAndSearch();
-    });
+    // Number fields commit into the draft; applied when the sheet closes.
     const minTok = root.querySelector('.wv-mintok');
     const maxTok = root.querySelector('.wv-maxtok');
-    for (const input of [minTok, maxTok]) input.addEventListener('input', () => {
-        state.minTok = Number(minTok.value) || null;
-        state.maxTok = Number(maxTok.value) || null;
-        persistFilters();
-        hydrateControls();
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(resetAndSearch, 500);
+    const minAir = root.querySelector('.wv-minair');
+    const minTags = root.querySelector('.wv-mintags');
+    for (const [input, key] of [[minTok, 'minTokens'], [maxTok, 'maxTokens'], [minAir, 'minAiRating'], [minTags, 'minTags']]) {
+        input.addEventListener('input', () => {
+            state.filters[key] = Number(input.value) || 0;
+        });
+    }
+
+    // Switch rows (toggle rows inside group cards)
+    root.querySelectorAll('.wv-sheetbody input[data-filter]').forEach(box => {
+        box.addEventListener('change', () => {
+            const key = box.dataset.filter;
+            if (key === 'nsfl') { box.checked = false; showNsflWarning(); return; }
+            state.filters[key] = box.checked;
+        });
     });
-    root.querySelector('.wv-tagfilter').addEventListener('input', () => renderTagCloud());
+
+    // Tag picker wiring
+    root.querySelector('.wv-tagfilter').addEventListener('input', () => {
+        const q = root.querySelector('.wv-tagfilter').value.trim();
+        root.querySelector('.wv-tagclear').hidden = !q;
+        clearTimeout(tagSearchTimer);
+        state.tagQuery = q;
+        state.tagExpanded = false;
+        renderTagPicker();
+        if (q) tagSearchTimer = setTimeout(() => fetchTagSuggestions(q), 250); // Glaze's debounce
+    });
+    root.querySelector('.wv-tagclear').addEventListener('click', () => {
+        root.querySelector('.wv-tagfilter').value = '';
+        root.querySelector('.wv-tagclear').hidden = true;
+        state.tagQuery = '';
+        state.tagSuggestions = [];
+        renderTagPicker();
+    });
+    root.querySelector('.wv-clearbtn').addEventListener('click', () => {
+        state.filters.tags.clear();
+        renderTagPicker();
+    });
+    root.querySelector('.wv-showall').addEventListener('click', () => {
+        state.tagExpanded = !state.tagExpanded;
+        renderTagPicker();
+    });
 
     // Infinite scroll (Glaze: load more when near the end)
     const sentinel = root.querySelector('.wv-sentinel');
     new IntersectionObserver(entries => {
         if (entries[0].isIntersecting) loadMore();
-    }, { root: root.querySelector('.wv-panel'), rootMargin: '400px' }).observe(sentinel);
+    }, { root: root.querySelector('.wv-panel'), rootMargin: '600px' }).observe(sentinel);
+}
+
+// ---------------------------------------------------------------------------
+// Filter sheet (Glaze CatalogFilterSheet: draft state, commit on close)
+// ---------------------------------------------------------------------------
+
+let tagSearchTimer = null;
+
+function openFilterSheet() {
+    const overlay = root.querySelector('.wv-filters-overlay');
+    // Fresh draft from the committed profile (Glaze initState); edits apply
+    // when the sheet closes.
+    state.filters = { ...state.filters, tags: new Set(state.filters.tags) };
+    const f = state.filters;
+    root.querySelectorAll('.wv-sheetbody input[data-filter]').forEach(box => {
+        if (box.dataset.filter === 'nsfl') { box.checked = false; return; }
+        box.checked = Boolean(f[box.dataset.filter]);
+    });
+    root.querySelector('.wv-mintok').value = f.minTokens;
+    root.querySelector('.wv-maxtok').value = f.maxTokens;
+    root.querySelector('.wv-minair').value = f.minAiRating;
+    root.querySelector('.wv-mintags').value = f.minTags;
+    syncCollapsible();
+    state.tagExpanded = false;
+    state.tagQuery = '';
+    state.tagSuggestions = [];
+    root.querySelector('.wv-tagfilter').value = '';
+    root.querySelector('.wv-tagclear').hidden = true;
+    overlay.hidden = false;
+    ensureTagCloud();
+    renderTagPicker();
+}
+
+function syncCollapsible() {
+    const collapsible = root.querySelector('.wv-collapsible');
+    const f = state.filters;
+    const reqActive = REQUIRE_ROWS.filter(([k]) => f[k]).length;
+    const open = reqActive > 0;
+    collapsible.dataset.open = String(open);
+    collapsible.querySelector('.wv-collapse-body').hidden = !open;
+    collapsible.querySelector('.wv-collapse-label').textContent =
+        reqActive > 0 ? `Must include · ${reqActive}` : 'Must include';
+}
+
+function closeFilterSheet() {
+    const overlay = root.querySelector('.wv-filters-overlay');
+    overlay.hidden = true;
+    // Glaze: commit on dispose — diff the draft against the committed profile.
+    const draft = state.filters;
+    const committed = committedFilters();
+    const draftTags = [...draft.tags].sort();
+    const changed =
+        draft.nsfw !== committed.nsfw ||
+        draft.nsfwOnly !== committed.nsfwOnly ||
+        draft.minTokens !== committed.minTokens ||
+        draft.maxTokens !== committed.maxTokens ||
+        draft.minAiRating !== committed.minAiRating ||
+        draft.minTags !== committed.minTags ||
+        draft.requireImages !== committed.requireImages ||
+        draft.requireLore !== committed.requireLore ||
+        draft.requireCustomPrompt !== committed.requireCustomPrompt ||
+        draft.requireExampleDialogues !== committed.requireExampleDialogues ||
+        draft.requireAlternateGreetings !== committed.requireAlternateGreetings ||
+        draft.recommendedVerified !== committed.recommendedVerified ||
+        draft.inclusiveOr !== committed.inclusiveOr ||
+        JSON.stringify(draftTags) !== JSON.stringify([...committed.tagNames].sort());
+    if (changed) {
+        commitFilters();
+        resetAndSearch();
+    }
+}
+
+function commitFilters() {
+    const draft = state.filters;
+    const f = committedFilters();
+    Object.assign(f, {
+        nsfw: draft.nsfw,
+        nsfwOnly: draft.nsfwOnly,
+        minTokens: draft.minTokens,
+        maxTokens: draft.maxTokens,
+        minAiRating: draft.minAiRating,
+        minTags: draft.minTags,
+        requireImages: draft.requireImages,
+        requireLore: draft.requireLore,
+        requireCustomPrompt: draft.requireCustomPrompt,
+        requireExampleDialogues: draft.requireExampleDialogues,
+        requireAlternateGreetings: draft.requireAlternateGreetings,
+        recommendedVerified: draft.recommendedVerified,
+        inclusiveOr: draft.inclusiveOr,
+        tagNames: [...draft.tags],
+    });
+    state.nsfw = f.nsfw;
+    state.filters = { ...f, tags: new Set(f.tagNames) };
+    saveSettingsQuiet();
+    hydrateControls();
+}
+
+// Glaze's NSFL gate: the public chub API silently ignores NSFL without an
+// account, so flipping it on opens the content-warning sheet instead.
+function showNsflWarning() {
+    const overlay = document.createElement('div');
+    overlay.className = 'wv-subsheet-overlay';
+    overlay.innerHTML = `
+        <div class="wv-subsheet">
+            <div class="wv-subsheet-head">NSFL Content Warning</div>
+            <div class="wv-biginfo">
+                <span class="fa-solid fa-triangle-exclamation wv-biginfo-icon"></span>
+                <p>Trust me, you don't want to do this.</p>
+            </div>
+            <div class="wv-sheetitems">
+                <button class="wv-sheetitem wv-danger" data-act="confirm">I have nothing to lose</button>
+                <button class="wv-sheetitem" data-act="cancel">I'm too young to die</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => {
+        const act = e.target?.closest('button')?.dataset?.act;
+        if (!act && e.target !== overlay) return;
+        overlay.remove();
+    });
 }
 
 async function ensureTagCloud() {
     if (state.tagCloud || state.tagCloudLoading) return;
     state.tagCloudLoading = true;
-    renderTagCloud();
+    renderTagPicker();
     try {
         const r = await fetch('/api/weavers-vault/chub/tags', {
             method: 'POST',
             headers: getRequestHeaders(),
-            body: JSON.stringify({ limit: 80, sort: 'n_projects', nsfw: true, nsfl: false }),
+            body: JSON.stringify({ limit: 300, sort: 'n_projects', nsfw: true, nsfl: false }),
         });
         const body = await r.json();
-        if (r.ok) state.tagCloud = body.tags ?? [];
+        if (r.ok) state.tagCloud = (body.tags ?? []).map(t => t.name);
         else toastr.error(body?.error || `chub.ai answered ${r.status}`, "Weaver's Vault tags");
     } catch (error) {
         toastr.error(error.message, "Weaver's Vault tags");
     } finally {
         state.tagCloudLoading = false;
-        renderTagCloud();
+        renderTagPicker();
     }
+}
+
+async function fetchTagSuggestions(q) {
+    state.tagSuggestionsLoading = true;
+    renderTagPicker();
+    try {
+        const r = await fetch('/api/weavers-vault/chub/tags', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ limit: 20, search: q, nsfw: true, nsfl: false }),
+        });
+        const body = await r.json();
+        if (state.tagQuery !== q) return; // stale (out-of-order response guard)
+        state.tagSuggestions = (body.tags ?? []).map(t => t.name);
+    } catch {
+        if (state.tagQuery === q) state.tagSuggestions = [];
+    } finally {
+        if (state.tagQuery === q) {
+            state.tagSuggestionsLoading = false;
+            renderTagPicker();
+        }
+    }
+}
+
+// FilterTagPicker render: selected chips row → search → grid (local matches,
+// starts-with first + remote suggestions + "add raw query" chip) → folding
+// at collapsedCount 24, folding only when the pool exceeds 24 + 6.
+function renderTagPicker() {
+    const f = state.filters;
+    if (!f) return;
+    const cloud = root.querySelector('.wv-tagcloud');
+    const selwrap = root.querySelector('.wv-selwrap');
+    const clearBtn = root.querySelector('.wv-clearbtn');
+    const showAll = root.querySelector('.wv-showall');
+    const query = (root.querySelector('.wv-tagfilter').value || '').trim().toLowerCase();
+
+    // Header trailing "Clear (n)"
+    const selectedCount = f.tags.size;
+    clearBtn.hidden = selectedCount === 0;
+    clearBtn.textContent = `Clear (${selectedCount})`;
+
+    // Selected chips row (sits above the search field)
+    if (selectedCount > 0) {
+        selwrap.hidden = false;
+        selwrap.innerHTML = [...f.tags].map(t =>
+            `<button class="wv-tchip wv-sel" data-tag="${escapeHtml(t)}">${escapeHtml(t)}<span class="fa-solid fa-xmark wv-chipx"></span></button>`).join('');
+        selwrap.querySelectorAll('.wv-tchip').forEach(b => b.addEventListener('click', () => {
+            f.tags.delete(b.dataset.tag);
+            renderTagPicker();
+        }));
+    } else {
+        selwrap.hidden = true;
+        selwrap.innerHTML = '';
+    }
+
+    // Grid
+    if (state.tagCloudLoading && !state.tagCloud && !query) {
+        cloud.innerHTML = '<div class="wv-tagloading"><span class="wv-spinner"></span></div>';
+        showAll.hidden = true;
+        return;
+    }
+    let pool;
+    if (query) {
+        const known = new Set((state.tagCloud ?? []).map(t => t.toLowerCase()));
+        const local = (state.tagCloud ?? [])
+            .filter(t => !f.tags.has(t) && t.toLowerCase().includes(query))
+            .sort((a, b) => (b.toLowerCase().startsWith(query) ? 1 : 0) - (a.toLowerCase().startsWith(query) ? 1 : 0));
+        const remote = (state.tagSuggestions ?? [])
+            .map(s => s.trim())
+            .filter(s => s && !known.has(s.toLowerCase()) && ![...f.tags].some(t => t.toLowerCase() === s.toLowerCase()))
+            .map(s => ({ name: s }));
+        pool = [...local.map(t => ({ name: t })), ...remote];
+        const addRaw = ![...f.tags].some(t => t.toLowerCase() === query)
+            && !(state.tagCloud ?? []).some(t => t.toLowerCase() === query)
+            && !remote.some(t => t.name.toLowerCase() === query);
+        if (addRaw) pool.push({ name: query, addRaw: true });
+        if (!pool.length) {
+            cloud.innerHTML = `<div class="wv-taghint">${state.tagSuggestionsLoading ? 'Searching tags...' : 'No tags found'}</div>`;
+            showAll.hidden = true;
+            return;
+        }
+    } else {
+        pool = (state.tagCloud ?? []).filter(t => !f.tags.has(t)).map(t => ({ name: t }));
+        if (!pool.length) {
+            cloud.innerHTML = '<div class="wv-taghint">No tags yet</div>';
+            showAll.hidden = true;
+            return;
+        }
+    }
+
+    const LIMIT = 24;
+    const folds = pool.length > LIMIT + 6;
+    const shown = folds && !state.tagExpanded ? pool.slice(0, LIMIT) : pool;
+    cloud.innerHTML = shown.map(t => t.addRaw
+        ? `<button class="wv-tchip wv-addraw" data-raw="1"><span class="fa-solid fa-plus"></span>${escapeHtml(t.name)}</button>`
+        : `<button class="wv-tchip" data-tag="${escapeHtml(t.name)}">${tagEmoji(t.name)} ${escapeHtml(t.name)}</button>`).join('');
+    showAll.hidden = !folds;
+    if (folds) showAll.innerHTML = state.tagExpanded
+        ? '<span class="fa-solid fa-chevron-up"></span> Show less'
+        : `<span class="fa-solid fa-chevron-down"></span> Show all (${pool.length})`;
+
+    cloud.querySelectorAll('.wv-tchip').forEach(b => b.addEventListener('click', () => {
+        if (b.dataset.raw) {
+            const raw = root.querySelector('.wv-tagfilter').value.trim();
+            if (raw) f.tags.add(raw);
+        } else {
+            f.tags.add(b.dataset.tag);
+        }
+        // A pick from a search result ends the search (Glaze): the chip moves
+        // up into the selection and the query is spent.
+        root.querySelector('.wv-tagfilter').value = '';
+        root.querySelector('.wv-tagclear').hidden = true;
+        state.tagQuery = '';
+        state.tagSuggestions = [];
+        state.tagExpanded = false;
+        renderTagPicker();
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -548,10 +913,6 @@ async function openDetail(item) {
         if (error.name === 'AbortError') return;
         popup.innerHTML = `<div class="wv-detail-body wv-status-error">chub.ai failed — ${escapeHtml(error.message)}</div>`;
     }
-}
-
-function escapeHtml(s) {
-    return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
 function renderDetail(popup, item, character) {

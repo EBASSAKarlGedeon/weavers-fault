@@ -2,7 +2,8 @@
 // Pure drawer/overlay extension: zero Loreweaver core edits. Imports happen in M3.
 // Attribution: source-adapter logic ported from Glaze (AGPL-3.0) — docs/vault/.
 import { extension_settings } from '../../extensions.js';
-import { getRequestHeaders } from '../../../script.js';
+import { getRequestHeaders, characters, getCharacters, importCharacter } from '../../../script.js';
+import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldInfo } from '../../world-info.js';
 
 const extensionName = "Weaver's Vault";
 const MODULE = 'weavers-vault';
@@ -68,6 +69,7 @@ function ensureOverlay() {
             <div class="wv-grid"></div>
             <div class="wv-endbar"></div>
             <div class="wv-sentinel"></div>
+            <div class="wv-detail" hidden></div>
         </div>
     `;
     document.body.appendChild(root);
@@ -239,13 +241,192 @@ function renderGrid() {
             chip.textContent = tag;
             tagRow.appendChild(chip);
         }
-        // M3 wires the detail popup onto this click.
+        // M3: detail popup on click.
+        card.addEventListener('click', () => openDetail(item));
         grid.appendChild(card);
     }
     const endbar = root.querySelector('.wv-endbar');
     endbar.textContent = state.reachedEnd && state.items.length ? 'End of results' : '';
 }
 
+// ---------------------------------------------------------------------------
+// Detail popup + import (M3)
+// ---------------------------------------------------------------------------
+
+let detailAbort = null;
+
+async function openDetail(item) {
+    ensureOverlay();
+    const popup = root.querySelector('.wv-detail');
+    popup.hidden = false;
+    popup.innerHTML = '<div class="wv-detail-body">Loading…</div>';
+    detailAbort?.abort();
+    detailAbort = new AbortController();
+    try {
+        const r = await fetch(`/api/weavers-vault/chub/character?fullPath=${encodeURIComponent(item.fullPath)}`,
+            { headers: getRequestHeaders(), signal: detailAbort.signal });
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.error || `chub.ai answered ${r.status}`);
+        renderDetail(popup, item, body.character);
+    } catch (error) {
+        if (error.name === 'AbortError') return;
+        popup.innerHTML = `<div class="wv-detail-body wv-status-error">chub.ai failed — ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function renderDetail(popup, item, character) {
+    const d = character.data;
+    const book = d.character_book;
+    const bookEntries = book?.entries ? (book.entries.length ?? Object.keys(book.entries).length) : 0;
+    popup.innerHTML = `
+        <div class="wv-detail-head">
+            <img class="wv-detail-poster" src="${escapeHtml(item.avatarUrl || '')}" referrerpolicy="no-referrer" alt="" />
+            <div class="wv-detail-titlebox">
+                <div class="wv-detail-name">${escapeHtml(d.name)}</div>
+                <div class="wv-detail-sub">by ${escapeHtml(d.creator)} · ${item.tokens ? `${fmtCount(item.tokens)} tokens` : ''}
+                    ${book ? ` · lorebook: ${bookEntries} entries` : ''}</div>
+                <div class="wv-detail-tags">${(d.tags ?? []).slice(0, 8).map(t => `<span class="wv-tag-chip">${escapeHtml(t)}</span>`).join('')}</div>
+            </div>
+            <button class="wv-detail-close menu_button" title="Close"><span class="fa-solid fa-xmark"></span></button>
+        </div>
+        <div class="wv-detail-body">
+            ${d.creator_notes ? `<h4>Creator's note</h4><div>${escapeHtml(d.creator_notes)}</div>` : ''}
+            ${d.description ? `<h4>Description</h4><div>${escapeHtml(d.description)}</div>` : ''}
+            ${d.personality ? `<h4>Personality</h4><div>${escapeHtml(d.personality)}</div>` : ''}
+            ${d.scenario ? `<h4>Scenario</h4><div>${escapeHtml(d.scenario)}</div>` : ''}
+            ${d.first_mes ? `<h4>First message</h4><div class="wv-detail-pre">${escapeHtml(d.first_mes.slice(0, 1200))}${d.first_mes.length > 1200 ? '…' : ''}</div>` : ''}
+            ${d.alternate_greetings?.length ? `<h4>Alternate greetings</h4><div>${d.alternate_greetings.length}</div>` : ''}
+            ${d.mes_example ? `<h4>Example dialogue</h4><div class="wv-detail-pre">${escapeHtml(d.mes_example.slice(0, 600))}${d.mes_example.length > 600 ? '…' : ''}</div>` : ''}
+            ${!d.description && !d.first_mes && !d.creator_notes ? '<div class="wv-status-error">No public definition on this card.</div>' : ''}
+        </div>
+        <div class="wv-detail-actions">
+            <a class="wv-detail-source menu_button" href="https://chub.ai/characters/${encodeURIComponent(item.fullPath)}" target="_blank" rel="noopener noreferrer">Open on source site ↗</a>
+            <button class="wv-import-button menu_button">Import</button>
+        </div>
+    `;
+    popup.querySelector('.wv-detail-close').addEventListener('click', () => { popup.hidden = true; });
+    popup.querySelector('.wv-import-button').addEventListener('click', () => {
+        if (book) showImportModeSheet(item, character);
+        else importChubCharacter(item, character, false);
+    });
+}
+
+// Glaze's import-mode options sheet — only shown when a lorebook exists (Q11).
+function showImportModeSheet(item, character) {
+    const popup = root.querySelector('.wv-detail');
+    const sheet = document.createElement('div');
+    sheet.className = 'wv-mode-sheet';
+    sheet.innerHTML = `
+        <div class="wv-mode-title">Import what?</div>
+        <button data-mode="both">Character + lorebook</button>
+        <button data-mode="character">Character only</button>
+        <button data-mode="lorebook">Lorebook only</button>
+        <button data-mode="cancel" class="wv-mode-cancel">Cancel</button>
+    `;
+    popup.appendChild(sheet);
+    sheet.addEventListener('click', e => {
+        const mode = e.target?.dataset?.mode;
+        if (!mode) return;
+        sheet.remove();
+        if (mode === 'cancel') return;
+        if (mode === 'lorebook') importChubLorebookOnly(item, character);
+        else importChubCharacter(item, character, mode === 'both');
+    });
+}
+
+function ledgerCheck(item) {
+    const s = settings();
+    return s.ledger.find(e => e.source === 'chub' && e.id === item.fullPath);
+}
+
+function ledgerAdd(item, what) {
+    const s = settings();
+    s.ledger.push({ source: 'chub', id: item.fullPath, name: item.name, what, at: Date.now(), url: `https://chub.ai/characters/${item.fullPath}` });
+    saveSettingsQuiet();
+}
+
+// Fetches a source file through Loreweaver's content pipeline (UA spoofing +
+// chub parsing happen server-side) and returns the ready-to-import File.
+async function vaultFetchSourceFile(url) {
+    const r = await fetch('/api/content/importURL', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ url }),
+    });
+    if (!r.ok) throw new Error(`Loreweaver content pipeline answered ${r.status}`);
+    const type = r.headers.get('X-Custom-Content-Type') ?? 'character';
+    const blob = await r.blob();
+    const fileName = (r.headers.get('Content-Disposition') ?? '').split('filename=')[1]?.replace(/"/g, '') ?? 'card.png';
+    return { file: new File([blob], fileName, { type: blob.type }), type };
+}
+
+async function importChubCharacter(item, character, withBook) {
+    const dup = ledgerCheck(item);
+    if (dup) {
+        toastr.warning(`Imported before (${new Date(dup.at).toLocaleString()}) — importing again creates a duplicate.`, "Weaver's Vault");
+    }
+    toastr.info('Importing character…', "Weaver's Vault");
+    try {
+        // Native chain minus the tag-import popup: content pipeline → importCharacter
+        // (importTags:false → no dialog; the card's tags still ride the card data).
+        const { file } = await vaultFetchSourceFile(`https://chub.ai/characters/${item.fullPath}`);
+        await importCharacter(file, { importTags: false });
+        await getCharacters();
+        // Match by name; the import pipeline's JSON may differ subtly from the detail fetch.
+        const target = characters.filter(c => c.name === character.data.name).pop();
+        if (!target) {
+            console.warn(`[${extensionName}] imported but could not locate character for provenance stamp`);
+        } else {
+            target.data.extensions = target.data.extensions ?? {};
+            target.data.extensions.vault_source = 'chub';
+            target.data.extensions.vault_url = `https://chub.ai/characters/${item.fullPath}`;
+            let bookName;
+            if (withBook && target.data.character_book) {
+                bookName = target.data.character_book.name || `${target.name}'s Lorebook`;
+                const converted = convertCharacterBook(target.data.character_book);
+                await saveWorldInfo(bookName, converted, true);
+                await updateWorldInfoList();
+                target.data.extensions.world = bookName;
+                toastr.success(`Lorebook '${bookName}' imported and linked.`, "Weaver's Vault");
+            }
+            // Stamp provenance via the standard character edit endpoint.
+            await fetch('/api/characters/edit', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({
+                    ch_name: target.name,
+                    avatar_url: target.avatar,
+                    json_data: JSON.stringify(target),
+                }),
+            });
+            await getCharacters();
+        }
+        ledgerAdd(item, 'character' + (withBook ? '+lorebook' : ''));
+        toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
+    } catch (error) {
+        console.error(`[${extensionName}] import failed`, error);
+        toastr.error(error.message, "Weaver's Vault import failed");
+    }
+}
+
+async function importChubLorebookOnly(item, character) {
+    const book = character.data.character_book;
+    if (!book) return;
+    try {
+        const bookName = book.name || `${character.data.name}'s Lorebook`;
+        const converted = convertCharacterBook(book);
+        await saveWorldInfo(bookName, converted, true);
+        await updateWorldInfoList();
+        ledgerAdd(item, 'lorebook');
+        toastr.success(`Lorebook '${bookName}' imported.`, "Weaver's Vault");
+    } catch (error) {
+        toastr.error(error.message, "Weaver's Vault import failed");
+    }
+}
 // ---------------------------------------------------------------------------
 // Wiring
 // ---------------------------------------------------------------------------

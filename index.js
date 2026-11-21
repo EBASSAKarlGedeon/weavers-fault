@@ -745,7 +745,7 @@ async function ensureTagCloud() {
         const r = await fetch('/api/weavers-vault/chub/tags', {
             method: 'POST',
             headers: getRequestHeaders(),
-            body: JSON.stringify({ limit: 300, sort: 'n_projects', nsfw: true, nsfl: false }),
+            body: JSON.stringify({ limit: 300, sort: 'n_projects', nsfw: true, nsfl: true }),
         });
         const body = await r.json();
         if (r.ok) state.tagCloud = (body.tags ?? []).map(t => t.name);

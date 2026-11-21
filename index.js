@@ -1,6 +1,9 @@
-// Weaver's Vault — character library extension (M2: browse UI for chub.ai).
-// Pure drawer/overlay extension: zero Loreweaver core edits. Imports happen in M3.
-// Attribution: source-adapter logic ported from Glaze (AGPL-3.0) — docs/vault/.
+// Weaver's Vault — character library extension.
+// Browse UI ported from Glaze's Discover tab (AGPL-3.0, github.com/hydall/Glaze):
+// glass controls (surface @ 0.8 + 12px backdrop blur + accent@18% border),
+// #19191A app bg / #1E1E1E surfaces / #C42A4A accent, catalog card with
+// white@15% border + lift-on-hover, text chips, filter sheet, epoch guard.
+// Source-adapter logic likewise ported from Glaze — see docs/ in the vault repo.
 import { extension_settings } from '../../extensions.js';
 import { getRequestHeaders, characters, getCharacters, importCharacter } from '../../../script.js';
 import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldInfo } from '../../world-info.js';
@@ -9,13 +12,13 @@ const extensionName = "Weaver's Vault";
 const MODULE = 'weavers-vault';
 
 const DEFAULTS = {
-    nsfw: false,          // Vault's own toggle, default SFW (design Q7-of-round-1)
+    nsfw: false,          // "Show NSFW" content filter (Glaze filter sheet)
     sort: 'popular',
     query: '',
     perPage: 24,
     openAfterImport: true,
     filters: {},          // per-source filter profiles (keyed by source id)
-    ledger: [],           // import ledger (Q4): {source, id, name, at, url}
+    ledger: [],           // import ledger (Q4): {source, id, name, what, at, url}
     favorites: [],        // {source, id, name}
 };
 
@@ -28,10 +31,57 @@ function settings() {
     return s;
 }
 
+function chubFilters() {
+    const s = settings();
+    s.filters.chub = s.filters.chub ?? {};
+    const f = s.filters.chub;
+    f.minTokens = Number(f.minTokens) || null;
+    f.maxTokens = Number(f.maxTokens) || null;
+    f.topics = Array.isArray(f.topics) ? f.topics : [];
+    return f;
+}
+
 function saveSettingsQuiet() {
     // extension_settings is saved by Loreweaver's debounced settings saver; pull it in.
     import('../../../script.js').then(m => m.saveSettingsDebounced());
 }
+
+// Glaze colors its tag chips with small emoji markers (category chips keep the
+// colored glyph, custom/hashtag chips render cyan). Map the common chub topics.
+const TAG_EMOJI = [
+    ['angst', '💔'], ['fluff', '🧸'], ['smut', '💋'], ['comedy', '😂'],
+    ['dominant', '⛓️'], ['submissive', '🧎'], ['dead dove', '🕊️'], ['game', '🎮'],
+    ['anime', '📺'], ['multiple', '👥'], ['anypov', '🎭'], ['malepov', '💁‍♂️'],
+    ['fempov', '💁‍♀️'], ['royalty', '👑'], ['monster', '👹'], ['magic', '✨'],
+    ['romance', '💗'], ['fantasy', '🐉'], ['adventure', '🗺️'], ['school', '🏫'],
+    ['strategy', '🧠'], ['cultivation', '☯️'], ['rpg', '🎲'], ['drama', '🎬'],
+    ['history', '📜'], ['sci-fi', '🚀'], ['science fiction', '🚀'], ['horror', '👻'],
+    ['mystery', '🔍'], ['villain', '🦹'], ['hero', '🦸'], ['non-human', '👽'],
+    ['fictional', '📚'], ['switch', '🔄'], ['maid', '🧹'], ['harem', '👥'],
+    ['cheating', '💔'], ['husband', '💍'], ['boxer', '🥊'],
+];
+function tagEmoji(tag) {
+    const l = String(tag).toLowerCase();
+    for (const [key, emoji] of TAG_EMOJI) if (l.includes(key)) return emoji;
+    return '';
+}
+
+const SORT_ICONS = {
+    popular: 'fa-solid fa-star',
+    trending_week: 'fa-solid fa-arrow-trend-up',
+    trending_24h: 'fa-solid fa-fire',
+    latest: 'fa-solid fa-clock',
+    rating: 'fa-solid fa-thumbs-up',
+    updated: 'fa-solid fa-rotate',
+};
+const SORT_LABELS = {
+    popular: 'Most popular',
+    trending_week: 'Trending this week',
+    trending_24h: 'Trending 24 hours',
+    latest: 'Latest',
+    rating: 'Top rated',
+    updated: 'Recently updated',
+};
 
 // ---------------------------------------------------------------------------
 // Overlay shell (proven RPG-engine pattern: fullscreen DOM overlay, no iframe)
@@ -46,47 +96,98 @@ function ensureOverlay() {
     root.hidden = true;
     root.innerHTML = `
         <div class="wv-panel">
-            <div class="wv-header">
-                <div class="wv-title"><span class="fa-solid fa-book"></span> Weaver's Vault</div>
-                <button class="wv-close menu_button" title="Close"><span class="fa-solid fa-xmark"></span></button>
+            <div class="wv-searchbar">
+                <span class="fa-solid fa-magnifying-glass"></span>
+                <input class="wv-search" type="text" placeholder="Search characters..." autocomplete="off" spellcheck="false" />
+                <button class="wv-iconbtn wv-close" title="Close (Esc)" aria-label="Close"><span class="fa-solid fa-xmark"></span></button>
             </div>
-            <div class="wv-toolbar">
-                <div class="wv-source-chip" title="Source (more coming)">chub.ai</div>
-                <input class="wv-search text_pole" type="text" placeholder="Search characters…" autocomplete="off" />
-                <select class="wv-sort" title="Sort">
-                    <option value="popular">Popular</option>
-                    <option value="trending_week">Trending (week)</option>
-                    <option value="trending_24h">Trending (24h)</option>
-                    <option value="latest">Latest</option>
-                    <option value="rating">Top rated</option>
-                    <option value="updated">Recently updated</option>
-                </select>
-                <label class="wv-nsfw-toggle" title="Show NSFW results">
-                    <input type="checkbox" class="wv-nsfw" /> <span>NSFW</span>
-                </label>
+            <div class="wv-row2">
+                <button class="wv-glass wv-source" title="Source (more coming in v2)">
+                    <span class="wv-srclogo">C</span>Chub<span class="fa-solid fa-chevron-down wv-dn"></span>
+                </button>
+                <div class="wv-right">
+                    <button class="wv-iconbtn wv-filterbtn" title="Filters" aria-label="Filters">
+                        <span class="fa-solid fa-filter"></span>
+                        <span class="wv-badge" hidden></span>
+                    </button>
+                    <div class="wv-sortwrap">
+                        <button class="wv-iconbtn wv-sortbtn" title="Sort" aria-label="Sort">
+                            <span class="fa-solid fa-arrow-down-wide-short wv-sorticon"></span>
+                            <span class="fa-solid fa-chevron-down wv-dn"></span>
+                        </button>
+                        <div class="wv-menu" hidden></div>
+                    </div>
+                </div>
+            </div>
+            <div class="wv-row3">
+                <button class="wv-fpill wv-nsfw-chip" hidden>NSFW <span class="wv-x">×</span></button>
             </div>
             <div class="wv-status"></div>
             <div class="wv-grid"></div>
             <div class="wv-endbar"></div>
             <div class="wv-sentinel"></div>
             <div class="wv-detail" hidden></div>
+            <div class="wv-filters-overlay" hidden>
+                <div class="wv-modal" role="dialog" aria-label="Filters">
+                    <div class="wv-mhead">
+                        <h2>Filters</h2>
+                        <button class="wv-mclose" aria-label="Close filters">×</button>
+                    </div>
+                    <div class="wv-msection">
+                        <div class="wv-mlabel">CONTENT</div>
+                        <div class="wv-mrow">
+                            <span>Show NSFW</span>
+                            <label class="wv-switch"><input type="checkbox" class="wv-nsfw" /><span class="wv-knob"></span></label>
+                        </div>
+                    </div>
+                    <div class="wv-msection">
+                        <div class="wv-mlabel">CARD</div>
+                        <div class="wv-toklabel">Token Range</div>
+                        <div class="wv-range">
+                            <div class="wv-tinput"><span>Min</span><input type="text" inputmode="numeric" class="wv-mintok" placeholder="0" /></div>
+                            <span class="wv-dash">-</span>
+                            <div class="wv-tinput"><span>Max</span><input type="text" inputmode="numeric" class="wv-maxtok" placeholder="100000" /></div>
+                        </div>
+                    </div>
+                    <div class="wv-msection">
+                        <div class="wv-mlabel">TAGS</div>
+                        <div class="wv-tagsearch">
+                            <span class="fa-solid fa-magnifying-glass"></span>
+                            <input type="text" class="wv-tagfilter" placeholder="Search tags..." spellcheck="false" />
+                        </div>
+                        <div class="wv-tagcloud"></div>
+                        <button class="wv-showall">⌄ Show all (<span class="wv-tagcount">0</span>)</button>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
     document.body.appendChild(root);
     root.querySelector('.wv-close').addEventListener('click', closeVault);
+    document.addEventListener('keydown', onKeydown);
     return root;
+}
+
+function onKeydown(e) {
+    if (!root || root.hidden || e.key !== 'Escape') return;
+    const overlay = root.querySelector('.wv-filters-overlay');
+    if (!overlay.hidden) { overlay.hidden = true; return; }
+    closeVault();
 }
 
 function openVault() {
     ensureOverlay();
     root.hidden = false;
     const s = settings();
-    const search = root.querySelector('.wv-search');
-    const sortSel = root.querySelector('.wv-sort');
-    const nsfw = root.querySelector('.wv-nsfw');
-    search.value = s.query;
-    sortSel.value = s.sort;
-    nsfw.checked = s.nsfw;
+    const f = chubFilters();
+    state.query = s.query;
+    state.sort = s.sort;
+    state.nsfw = s.nsfw;
+    state.topics = new Set(f.topics);
+    state.minTok = f.minTokens;
+    state.maxTok = f.maxTokens;
+    root.querySelector('.wv-search').value = s.query;
+    hydrateControls();
     if (!state.hydrated) {
         state.hydrated = true;
         runSearch();
@@ -108,6 +209,11 @@ const state = {
     query: '',
     sort: 'popular',
     nsfw: false,
+    topics: new Set(),
+    minTok: null,
+    maxTok: null,
+    tagCloud: null,      // lazily fetched tag index for the filter sheet
+    tagCloudLoading: false,
     page: 0,
     items: [],
     total: 0,
@@ -125,6 +231,10 @@ function resetAndSearch() {
     runSearch();
 }
 
+function activeFilterCount() {
+    return (state.nsfw ? 1 : 0) + state.topics.size + ((state.minTok || state.maxTok) ? 1 : 0);
+}
+
 function runSearch() {
     const myEpoch = ++state.epoch;
     state.loading = true;
@@ -140,6 +250,9 @@ function runSearch() {
             sort: state.sort,
             nsfw: state.nsfw,
             nsfl: false, // account-scoped on chub; v2 alongside the chub key
+            topics: [...state.topics],
+            minTokens: state.minTok || 0,
+            maxTokens: state.maxTok || 100000,
         }),
     })
         .then(r => r.json().then(body => ({ ok: r.ok, status: r.status, body })))
@@ -184,69 +297,232 @@ function renderStatus(text, isError = false) {
         el.hidden = false;
         return;
     }
+    // Glaze: result count line + "End of results" footer at the grid's end.
     if (state.reachedEnd) {
         el.textContent = state.items.length
-            ? `${state.items.length}${state.total ? ` of ${state.total}` : ''} — End of results`
+            ? `${state.items.length}${state.total ? ` of ${state.total}` : ''} results`
             : 'No results';
     } else {
-        el.hidden = true;
+        el.textContent = `${state.items.length}${state.total ? ` of ${state.total}` : ''} results`;
     }
+    el.hidden = false;
 }
 
+// Glaze's number formatting: 1.0k / 1.0kk.
 function fmtCount(n) {
-    if (!n) return '';
-    return n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+    n = Number(n) || 0;
+    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}kk`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+}
+
+function chipHtml(tag) {
+    const emoji = tagEmoji(tag);
+    if (emoji) return `<span class="wv-chip wv-c-cat">${emoji} ${escapeHtml(tag)}</span>`;
+    return `<span class="wv-chip wv-c-tag">#${escapeHtml(tag)}</span>`;
 }
 
 function renderGrid() {
     const grid = root.querySelector('.wv-grid');
-    const nsfwOn = state.nsfw;
     grid.innerHTML = '';
     for (const item of state.items) {
-        const card = document.createElement('div');
+        const card = document.createElement('article');
         card.className = 'wv-card';
-        const blur = item.nsfw && !nsfwOn;
+        const blur = item.nsfw && !state.nsfw;
+        const tags = item.tags ?? [];
+        const chips = [
+            `<span class="wv-chip ${item.nsfw ? 'wv-c-nsfw' : 'wv-c-sfw'}">${item.nsfw ? 'NSFW' : 'SFW'}</span>`,
+            ...tags.slice(0, 8).map(chipHtml),
+        ].join('');
         card.innerHTML = `
-            <div class="wv-poster ${blur ? 'wv-blur' : ''}">
+            <div class="wv-art ${blur ? 'wv-blur' : ''}">
                 <img loading="lazy" referrerpolicy="no-referrer" alt="" />
-                ${item.nsfw && !nsfwOn ? '<button class="wv-reveal" title="Reveal">👁</button>' : ''}
+                <div class="wv-ph"></div>
+                ${blur ? '<button class="wv-reveal" title="Reveal">👁</button>' : ''}
+                <span class="wv-chat"><span class="fa-regular fa-envelope"></span><span class="wv-chat-n">${item.chatCount ? fmtCount(item.chatCount) : ''}</span></span>
             </div>
-            <div class="wv-card-name" title=""></div>
-            <div class="wv-card-meta"></div>
-            <div class="wv-card-tags"></div>
+            <div class="wv-info">
+                <h3 class="wv-card-name"></h3>
+                <div class="wv-creator"></div>
+                <div class="wv-tokens"></div>
+                <div class="wv-chips">${chips}</div>
+                <p class="wv-syn"></p>
+            </div>
         `;
         const img = card.querySelector('img');
         img.src = item.avatarUrl || '';
-        card.querySelector('.wv-poster').dataset.letter = (item.name || '?')[0];
-        img.addEventListener('error', () => { img.src = ''; card.querySelector('.wv-poster').classList.add('wv-noimg'); });
+        card.querySelector('.wv-ph').textContent = (item.name || '?')[0].toUpperCase();
+        img.addEventListener('error', () => { img.remove(); card.querySelector('.wv-art').classList.add('wv-noimg'); });
         if (blur) {
             card.querySelector('.wv-reveal')?.addEventListener('click', e => {
                 e.stopPropagation();
-                card.querySelector('.wv-poster').classList.remove('wv-blur');
+                card.querySelector('.wv-art').classList.remove('wv-blur');
                 card.querySelector('.wv-reveal').remove();
             });
         }
         const name = card.querySelector('.wv-card-name');
         name.textContent = item.name;
         name.title = item.name;
-        const meta = card.querySelector('.wv-card-meta');
-        const bits = [];
-        if (item.tokens) bits.push(`${fmtCount(item.tokens)} tokens`);
-        if (item.chatCount) bits.push(`💬 ${fmtCount(item.chatCount)}`);
-        meta.textContent = bits.join(' · ');
-        const tagRow = card.querySelector('.wv-card-tags');
-        for (const tag of (item.tags ?? []).slice(0, 3)) {
-            const chip = document.createElement('span');
-            chip.className = 'wv-tag-chip';
-            chip.textContent = tag;
-            tagRow.appendChild(chip);
-        }
+        card.querySelector('.wv-creator').textContent = `@${item.creator}`;
+        card.querySelector('.wv-tokens').textContent = item.tokens ? `${fmtCount(item.tokens)} tokens` : '';
+        card.querySelector('.wv-syn').textContent = item.description || '';
         // M3: detail popup on click.
         card.addEventListener('click', () => openDetail(item));
         grid.appendChild(card);
     }
     const endbar = root.querySelector('.wv-endbar');
     endbar.textContent = state.reachedEnd && state.items.length ? 'End of results' : '';
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar wiring (glass controls, sort menu, filter sheet)
+// ---------------------------------------------------------------------------
+
+function hydrateControls() {
+    const badge = root.querySelector('.wv-badge');
+    const n = activeFilterCount();
+    badge.hidden = n === 0;
+    badge.textContent = n;
+    root.querySelector('.wv-nsfw-chip').hidden = !state.nsfw;
+    root.querySelector('.wv-nsfw').checked = state.nsfw;
+    root.querySelector('.wv-mintok').value = state.minTok ?? '';
+    root.querySelector('.wv-maxtok').value = state.maxTok ?? '';
+    const sortIcon = root.querySelector('.wv-sorticon');
+    sortIcon.className = `${SORT_ICONS[state.sort] ?? 'fa-solid fa-sort'} wv-sorticon`;
+    renderSortMenu();
+    renderTagCloud();
+}
+
+function renderSortMenu() {
+    const menu = root.querySelector('.wv-menu');
+    menu.innerHTML = Object.entries(SORT_LABELS).map(([key, label]) =>
+        `<button data-sort="${key}" class="${key === state.sort ? 'wv-on' : ''}">${label}</button>`).join('');
+    menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+        state.sort = b.dataset.sort;
+        settings().sort = state.sort;
+        saveSettingsQuiet();
+        menu.hidden = true;
+        hydrateControls();
+        resetAndSearch();
+    }));
+}
+
+function renderTagCloud() {
+    const cloud = root.querySelector('.wv-tagcloud');
+    const selected = state.topics;
+    if (!state.tagCloud) {
+        cloud.innerHTML = state.tagCloudLoading
+            ? '<span class="wv-taghint">Loading tags…</span>'
+            : '<span class="wv-taghint">Open the vault once with the filter sheet to load the tag index.</span>';
+        root.querySelector('.wv-tagcount').textContent = state.tagCloud?.length ?? 0;
+        return;
+    }
+    const query = (root.querySelector('.wv-tagfilter').value || '').toLowerCase();
+    cloud.innerHTML = state.tagCloud
+        .filter(t => !query || t.name.toLowerCase().includes(query))
+        .map(t => `<button class="wv-tchip ${selected.has(t.name) ? 'wv-sel' : ''}" data-tag="${escapeHtml(t.name)}">${tagEmoji(t.name)} ${escapeHtml(t.name)}</button>`)
+        .join('');
+    root.querySelector('.wv-tagcount').textContent = state.tagCloud.length;
+    cloud.querySelectorAll('.wv-tchip').forEach(b => b.addEventListener('click', () => {
+        const tag = b.dataset.tag;
+        if (state.topics.has(tag)) state.topics.delete(tag); else state.topics.add(tag);
+        b.classList.toggle('wv-sel');
+        persistFilters();
+        hydrateControls();
+        resetAndSearch();
+    }));
+}
+
+function persistFilters() {
+    const f = chubFilters();
+    f.topics = [...state.topics];
+    f.minTokens = state.minTok;
+    f.maxTokens = state.maxTok;
+    settings().nsfw = state.nsfw;
+    saveSettingsQuiet();
+}
+
+function wireToolbar() {
+    const search = root.querySelector('.wv-search');
+    search.addEventListener('input', () => {
+        state.query = search.value;
+        settings().query = search.value;
+        saveSettingsQuiet();
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(resetAndSearch, 400); // Glaze's debounce cadence
+    });
+
+    // Sort menu (glass chip → picker, Glaze sortIconChip)
+    root.querySelector('.wv-sortbtn').addEventListener('click', e => {
+        e.stopPropagation();
+        const menu = root.querySelector('.wv-menu');
+        menu.hidden = !menu.hidden;
+    });
+    document.addEventListener('click', e => {
+        const menu = root.querySelector('.wv-menu');
+        if (menu && !menu.hidden && !menu.contains(e.target)) menu.hidden = true;
+    });
+
+    // NSFW chip (active-filter pill with ×)
+    root.querySelector('.wv-nsfw-chip').addEventListener('click', e => {
+        state.nsfw = e.target.classList.contains('wv-x') ? false : !state.nsfw;
+        persistFilters();
+        hydrateControls();
+        resetAndSearch();
+    });
+
+    // Filter sheet
+    const overlay = root.querySelector('.wv-filters-overlay');
+    root.querySelector('.wv-filterbtn').addEventListener('click', () => {
+        overlay.hidden = false;
+        ensureTagCloud();
+    });
+    root.querySelector('.wv-mclose').addEventListener('click', () => { overlay.hidden = true; });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.hidden = true; });
+    root.querySelector('.wv-nsfw').addEventListener('change', e => {
+        state.nsfw = e.target.checked;
+        persistFilters();
+        hydrateControls();
+        resetAndSearch();
+    });
+    const minTok = root.querySelector('.wv-mintok');
+    const maxTok = root.querySelector('.wv-maxtok');
+    for (const input of [minTok, maxTok]) input.addEventListener('input', () => {
+        state.minTok = Number(minTok.value) || null;
+        state.maxTok = Number(maxTok.value) || null;
+        persistFilters();
+        hydrateControls();
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(resetAndSearch, 500);
+    });
+    root.querySelector('.wv-tagfilter').addEventListener('input', () => renderTagCloud());
+
+    // Infinite scroll (Glaze: load more when near the end)
+    const sentinel = root.querySelector('.wv-sentinel');
+    new IntersectionObserver(entries => {
+        if (entries[0].isIntersecting) loadMore();
+    }, { root: root.querySelector('.wv-panel'), rootMargin: '400px' }).observe(sentinel);
+}
+
+async function ensureTagCloud() {
+    if (state.tagCloud || state.tagCloudLoading) return;
+    state.tagCloudLoading = true;
+    renderTagCloud();
+    try {
+        const r = await fetch('/api/weavers-vault/chub/tags', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ limit: 80, sort: 'n_projects', nsfw: true, nsfl: false }),
+        });
+        const body = await r.json();
+        if (r.ok) state.tagCloud = body.tags ?? [];
+        else toastr.error(body?.error || `chub.ai answered ${r.status}`, "Weaver's Vault tags");
+    } catch (error) {
+        toastr.error(error.message, "Weaver's Vault tags");
+    } finally {
+        state.tagCloudLoading = false;
+        renderTagCloud();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +565,7 @@ function renderDetail(popup, item, character) {
                 <div class="wv-detail-name">${escapeHtml(d.name)}</div>
                 <div class="wv-detail-sub">by ${escapeHtml(d.creator)} · ${item.tokens ? `${fmtCount(item.tokens)} tokens` : ''}
                     ${book ? ` · lorebook: ${bookEntries} entries` : ''}</div>
-                <div class="wv-detail-tags">${(d.tags ?? []).slice(0, 8).map(t => `<span class="wv-tag-chip">${escapeHtml(t)}</span>`).join('')}</div>
+                <div class="wv-detail-tags">${(d.tags ?? []).slice(0, 8).map(t => chipHtml(t)).join('')}</div>
             </div>
             <button class="wv-detail-close menu_button" title="Close"><span class="fa-solid fa-xmark"></span></button>
         </div>
@@ -427,41 +703,10 @@ async function importChubLorebookOnly(item, character) {
         toastr.error(error.message, "Weaver's Vault import failed");
     }
 }
+
 // ---------------------------------------------------------------------------
 // Wiring
 // ---------------------------------------------------------------------------
-
-function wireToolbar() {
-    const search = root.querySelector('.wv-search');
-    const sortSel = root.querySelector('.wv-sort');
-    const nsfw = root.querySelector('.wv-nsfw');
-    search.addEventListener('input', () => {
-        state.query = search.value;
-        settings().query = search.value;
-        saveSettingsQuiet();
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(resetAndSearch, 400); // Glaze's debounce cadence
-    });
-    sortSel.addEventListener('change', () => {
-        state.sort = sortSel.value;
-        settings().sort = sortSel.value;
-        saveSettingsQuiet();
-        resetAndSearch();
-    });
-    nsfw.addEventListener('change', () => {
-        state.nsfw = nsfw.checked;
-        settings().nsfw = nsfw.checked;
-        saveSettingsQuiet();
-        resetAndSearch();
-        // Also unblur already-rendered cards when switching on without a refetch.
-        if (nsfw.checked) root.querySelectorAll('.wv-blur').forEach(el => el.classList.remove('wv-blur'));
-    });
-    // Infinite scroll (Glaze: load more when near the end)
-    const sentinel = root.querySelector('.wv-sentinel');
-    new IntersectionObserver(entries => {
-        if (entries[0].isIntersecting) loadMore();
-    }, { root: root.querySelector('.wv-panel'), rootMargin: '400px' }).observe(sentinel);
-}
 
 function addMenuEntry() {
     const menu = document.getElementById('extensionsMenu');

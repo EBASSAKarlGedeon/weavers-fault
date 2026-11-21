@@ -1,13 +1,29 @@
-/* Weaver's Vault — overlay + browse grid (M2) */
+/* Weaver's Vault — Glaze Discover UI port (AGPL-3.0 upstream: github.com/hydall/Glaze).
+   Palette + glass recipe extracted from Glaze source:
+   - app bg #19191A (--app-bg), surfaces #1E1E1E (--ui-bg-default-rgb)
+   - accent #C42A4A, outline #2C2D2E
+   - glass controls: surface tint @ 0.8 opacity + 12px backdrop blur + accent@18% border
+   - catalog cards: opaque surface, radius 16, white@15% border,
+     shadow black 10% → 30% on hover with -4px lift / 1.01 scale (easeOutBack)
+   - chips: NSFW #FF4444@20%, SFW #4CAF50@20%, hashtags cyan #00CCCC@10% */
 
 #wv-root {
+    --wv-bg: #19191A;
+    --wv-ui: #1E1E1E;
+    --wv-accent: #C42A4A;
+    --wv-outline: #2C2D2E;
+    --wv-glass: rgba(25, 25, 26, 0.8);
+    --wv-glass-border: rgba(196, 42, 74, 0.18);
+    --wv-card-border: rgba(255, 255, 255, 0.15);
+    --wv-muted: #828282;
     position: fixed;
     inset: 0;
     z-index: 9998;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--wv-bg);
     display: flex;
     align-items: stretch;
     justify-content: center;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 
 #wv-root[hidden] {
@@ -15,365 +31,916 @@
 }
 
 .wv-panel {
+    position: relative;
     display: flex;
     flex-direction: column;
-    width: min(1400px, 100%);
+    width: 100%;
     height: 100%;
-    /* ST theme vars: BlurTint = panel background, BodyColor = TEXT color */
-    background: var(--SmartThemeBlurTintColor, #14141f);
-    color: var(--SmartThemeBodyColor, #e0e0e8);
-    border: 1px solid var(--SmartThemeBorderColor, #333);
-    overflow: hidden;
-    backdrop-filter: blur(16px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    color: #f2f1f4;
+    padding: 14px 16px 40px;
 }
 
-.wv-header {
+/* Glaze NoiseOverlay: 3% fractal noise over the app background */
+.wv-panel::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.03;
+    z-index: 1;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 140px;
+}
+
+.wv-panel > * {
+    position: relative;
+    z-index: 2;
+}
+
+.wv-panel button {
+    font: inherit;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    color: inherit;
+}
+
+/* ------------------------------------------------------------------ */
+/* Search bar: filled surface, radius 12, outline border, accent focus */
+/* ------------------------------------------------------------------ */
+
+.wv-searchbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
-}
-
-.wv-title {
-    font-weight: 600;
-    font-size: 1.1em;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.wv-toolbar {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 10px 14px;
-    flex-wrap: wrap;
-    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
-}
-
-.wv-source-chip {
-    padding: 4px 10px;
+    gap: 14px;
+    background: var(--wv-ui);
+    border: 1px solid var(--wv-outline);
     border-radius: 12px;
-    background: var(--SmartThemeBlurTintColor, #262640);
-    border: 1px solid var(--SmartThemeBorderColor, #444);
-    font-size: 0.85em;
-    white-space: nowrap;
+    height: 54px;
+    padding: 0 20px;
+    color: var(--wv-muted);
+    flex-shrink: 0;
+}
+
+.wv-searchbar:focus-within {
+    border-color: var(--wv-accent);
 }
 
 .wv-search {
-    flex: 1 1 240px;
-    min-width: 160px;
+    flex: 1;
+    height: 100%;
+    border: 0;
+    background: none;
+    outline: none;
+    color: #f2f1f4;
+    font-size: 15px;
+    font-family: inherit;
 }
 
-.wv-sort {
-    max-width: 200px;
+.wv-search::placeholder {
+    color: #7b7883;
 }
 
-.wv-nsfw-toggle {
+/* ------------------------------------------------------------------ */
+/* Glass controls: source pill, filter button, sort chip               */
+/* ------------------------------------------------------------------ */
+
+.wv-row2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 14px 0 4px;
+    flex-shrink: 0;
+    /* keep the controls row (and its dropdown menu) above the card grid */
+    z-index: 30;
+}
+
+.wv-glass {
     display: flex;
     align-items: center;
-    gap: 5px;
-    cursor: pointer;
-    user-select: none;
-    font-size: 0.9em;
-    white-space: nowrap;
+    gap: 8px;
+    height: 34px;
+    border-radius: 17px;
+    background: var(--wv-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--wv-glass-border);
+    color: #e6e4e8;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 0 12px;
+    transition: background 0.15s;
 }
 
-.wv-status {
-    padding: 6px 14px;
-    font-size: 0.9em;
+.wv-glass:hover {
+    background: rgba(25, 25, 26, 0.95);
+}
+
+.wv-srclogo {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #7b2d8e, #c73a63);
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 800;
+    color: #fff;
+}
+
+.wv-dn {
+    font-size: 0.7em;
+    color: var(--wv-muted);
+}
+
+.wv-right {
+    display: flex;
+    gap: 8px;
+}
+
+.wv-iconbtn {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background: var(--wv-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--wv-glass-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    color: var(--wv-accent);
+    font-size: 14px;
+    transition: background 0.15s;
+}
+
+.wv-iconbtn:hover {
+    background: rgba(25, 25, 26, 0.95);
+}
+
+.wv-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    background: var(--wv-accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    padding: 0 4px;
+}
+
+.wv-badge[hidden] {
+    display: none;
+}
+
+.wv-sortwrap {
+    position: relative;
+}
+
+.wv-menu {
+    position: absolute;
+    right: 0;
+    top: 42px;
+    background: var(--wv-ui);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 210px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    z-index: 40;
+}
+
+.wv-menu[hidden] {
+    display: none;
+}
+
+.wv-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #d8d5dc;
+}
+
+.wv-menu button:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.wv-menu button.wv-on {
+    color: var(--wv-accent);
+}
+
+.wv-menu button.wv-on::after {
+    content: '✓';
+    font-weight: 700;
+}
+
+/* Active-filter pill row (NSFW chip with ×) */
+.wv-row3 {
+    margin: 9px 0 2px;
+    min-height: 28px;
+    flex-shrink: 0;
+}
+
+.wv-fpill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    border-radius: 16px;
+    background: rgba(255, 68, 68, 0.2);
+    border: 1px solid rgba(255, 68, 68, 0.3);
+    color: #FF4444;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 11px;
+}
+
+.wv-fpill[hidden] {
+    display: none;
+}
+
+.wv-fpill .wv-x {
+    font-weight: 400;
     opacity: 0.85;
 }
 
-.wv-status-error {
-    color: #ff8f8f;
+/* Results / status line */
+.wv-status {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12.5px;
+    margin: 7px 0 13px;
+    flex-shrink: 0;
 }
 
+.wv-status-error {
+    color: #cf6679;
+}
+
+/* ------------------------------------------------------------------ */
+/* Card grid: Glaze catalog card                                       */
+/* ------------------------------------------------------------------ */
+
 .wv-grid {
-    flex: 1;
-    overflow-y: auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-    gap: 12px;
-    padding: 12px 14px;
-    align-content: start;
-    grid-auto-rows: max-content;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 22px 12px;
 }
 
 .wv-card {
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--SmartThemeBorderColor, #333);
-    border-radius: 8px;
-    overflow: hidden;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #20203a) 88%, var(--SmartThemeBodyColor, #fff) 12%);
+    min-width: 0;
     cursor: pointer;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
+    background: var(--wv-ui);
+    border: 1px solid var(--wv-card-border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s;
 }
 
 .wv-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
 }
 
-.wv-poster {
+.wv-card:active {
+    transform: scale(0.96);
+}
+
+.wv-art {
     position: relative;
-    /* 2:3 poster via the padding hack: % padding resolves against WIDTH, so the
-       height is always definite — Chromium ignores aspect-ratio when propagating
-       intrinsic heights through grid item > flex container > child. */
-    height: 0;
-    padding-top: 150%;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #2a2a48) 92%, black 8%);
+    aspect-ratio: 2 / 3;
+    overflow: hidden;
+    background: rgba(196, 42, 74, 0.2);
 }
 
-.wv-poster img {
-    position: absolute;
-    inset: 0;
+.wv-art img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
 }
 
-.wv-poster.wv-noimg::before {
-    content: attr(data-letter);
+/* Bottom-half fade into the card surface (Glaze _BottomFade) */
+.wv-art::after {
+    content: '';
     position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 3em;
-    opacity: 0.3;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 50%;
+    background: linear-gradient(rgba(30, 30, 30, 0), var(--wv-ui));
+    pointer-events: none;
 }
 
+.wv-ph {
+    display: none;
+    position: absolute;
+    inset: 0;
+    place-items: center;
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--wv-accent);
+}
+
+.wv-art.wv-noimg .wv-ph {
+    display: grid;
+}
+
+/* NSFW blur (display choice; reveal per card) */
 .wv-blur img {
-    filter: blur(14px) saturate(0.7);
-    transform: scale(1.08);
+    filter: blur(14px);
+    transform: scale(1.06);
 }
 
 .wv-reveal {
     position: absolute;
     inset: 0;
-    margin: auto;
-    width: fit-content;
-    height: fit-content;
-    padding: 8px 12px;
-    border-radius: 20px;
-    border: none;
-    background: rgba(0, 0, 0, 0.6);
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    font-size: 22px;
     color: #fff;
-    cursor: pointer;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.wv-chat {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 10px;
+    padding: 4px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #fff;
+    z-index: 1;
+}
+
+.wv-chat .fa-regular {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.wv-info {
+    padding: 10px 10px 12px;
 }
 
 .wv-card-name {
-    padding: 7px 9px 2px;
+    font-size: 15px;
+    line-height: 1.2;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.wv-creator {
+    color: var(--wv-accent);
+    font-size: 11px;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wv-tokens {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
     font-weight: 600;
-    font-size: 0.92em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    margin-top: 2px;
 }
 
-.wv-card-meta {
-    padding: 0 9px 4px;
-    font-size: 0.78em;
-    opacity: 0.75;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.wv-card-tags {
-    padding: 0 9px 8px;
+.wv-chips {
     display: flex;
-    gap: 4px;
     flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 8px;
 }
 
-.wv-tag-chip {
-    font-size: 0.72em;
-    padding: 1px 7px;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #2e2e52) 85%, var(--SmartThemeBodyColor, #fff) 15%);
-    border: 1px solid var(--SmartThemeBorderColor, #444);
+.wv-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 8px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    border: 1px solid transparent;
     white-space: nowrap;
-    max-width: 90px;
+}
+
+.wv-c-nsfw {
+    background: rgba(255, 68, 68, 0.2);
+    color: #FF4444;
+    border-color: rgba(255, 68, 68, 0.3);
+}
+
+.wv-c-sfw {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+    border-color: rgba(76, 175, 80, 0.3);
+}
+
+.wv-c-cat {
+    background: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.wv-c-tag {
+    background: rgba(0, 255, 255, 0.1);
+    color: #00CCCC;
+    border-color: rgba(0, 255, 255, 0.2);
+}
+
+.wv-syn {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    line-height: 1.4;
+    margin-top: 8px;
+    margin-bottom: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .wv-endbar {
-    padding: 6px 14px 10px;
     text-align: center;
-    font-size: 0.85em;
-    opacity: 0.6;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    padding: 24px 0 0;
 }
 
 .wv-sentinel {
     height: 1px;
 }
 
-/* Floating launcher (hide with: #wv-launcher { display:none }) */
-#wv-launcher {
+/* ------------------------------------------------------------------ */
+/* Filter sheet (Glaze filter modal): surface bg, accent section labels */
+/* ------------------------------------------------------------------ */
+
+.wv-filters-overlay {
     position: fixed;
-    right: 14px;
-    bottom: 92px;
-    z-index: 900;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    border: 1px solid var(--SmartThemeBorderColor, #444);
-    background: var(--SmartThemeBlurTintColor, #1a1a2e);
-    color: var(--SmartThemeBodyColor, #eee);
-    font-size: 20px;
+    inset: 0;
+    background: rgba(5, 4, 8, 0.55);
+    backdrop-filter: blur(3px);
+    z-index: 60;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow: auto;
+}
+
+.wv-filters-overlay[hidden] {
+    display: none;
+}
+
+.wv-modal {
+    background: var(--wv-ui);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    width: min(820px, 94vw);
+    margin-top: 56px;
+    padding: 24px 28px 30px;
+    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.75);
+}
+
+.wv-mhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+}
+
+.wv-mhead h2 {
+    font-size: 21px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.wv-mclose {
+    font-size: 24px;
+    color: #b9b6bf;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+}
+
+.wv-mclose:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.wv-msection {
+    padding: 18px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wv-msection:first-of-type {
+    border-top: 0;
+    padding-top: 4px;
+}
+
+.wv-mlabel {
+    color: var(--wv-accent);
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    margin-bottom: 14px;
+}
+
+.wv-mrow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 16px;
+}
+
+.wv-switch {
+    position: relative;
+    width: 46px;
+    height: 26px;
+    display: inline-block;
     cursor: pointer;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
 }
 
-/* Mobile: full width, tighter grid */
-@media (max-width: 700px) {
-    .wv-grid {
-        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-        gap: 8px;
-    }
+.wv-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
 }
 
-/* --- M3: detail popup + import mode sheet --- */
-
-.wv-detail {
+.wv-knob {
     position: absolute;
     inset: 0;
-    z-index: 5;
-    background: var(--SmartThemeBlurTintColor, #14141f);
-    color: var(--SmartThemeBodyColor, #e0e0e8);
-    backdrop-filter: blur(16px);
+    border-radius: 14px;
+    background: #3a393e;
+    transition: 0.15s;
+}
+
+.wv-knob::after {
+    content: '';
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    top: 3px;
+    left: 3px;
+    transition: 0.15s;
+}
+
+.wv-switch input:checked + .wv-knob {
+    background: var(--wv-accent);
+}
+
+.wv-switch input:checked + .wv-knob::after {
+    left: 23px;
+}
+
+.wv-toklabel {
+    font-size: 15.5px;
+    margin-bottom: 12px;
+}
+
+.wv-range {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.wv-tinput {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #1a1a1b;
+    border: 1px solid var(--wv-outline);
+    border-radius: 12px;
+    padding: 12px 16px;
+}
+
+.wv-tinput:focus-within {
+    border-color: var(--wv-accent);
+}
+
+.wv-tinput span {
+    color: var(--wv-muted);
+    font-size: 14px;
+}
+
+.wv-tinput input {
+    width: 120px;
+    border: 0;
+    background: none;
+    outline: none;
+    color: #f2f1f4;
+    font-size: 14.5px;
+    text-align: right;
+    font-family: inherit;
+}
+
+.wv-dash {
+    color: var(--wv-muted);
+}
+
+.wv-tagsearch {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #1a1a1b;
+    border: 1px solid var(--wv-outline);
+    border-radius: 24px;
+    padding: 12px 18px;
+    color: var(--wv-muted);
+    margin-bottom: 16px;
+}
+
+.wv-tagsearch:focus-within {
+    border-color: var(--wv-accent);
+}
+
+.wv-tagsearch input {
+    flex: 1;
+    border: 0;
+    background: none;
+    outline: none;
+    color: #f2f1f4;
+    font-size: 14.5px;
+    font-family: inherit;
+}
+
+.wv-tagcloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+}
+
+.wv-taghint {
+    color: var(--wv-muted);
+    font-size: 13px;
+}
+
+.wv-tchip {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #e2e0e5;
+    border-radius: 10px;
+    padding: 8px 13px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.wv-tchip.wv-sel {
+    background: rgba(196, 42, 74, 0.2);
+    border-color: rgba(196, 42, 74, 0.5);
+    color: #ff7d94;
+}
+
+.wv-showall {
+    color: var(--wv-accent);
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Detail popup (M3) — restyled to the Glaze palette                   */
+/* ------------------------------------------------------------------ */
+
+.wv-detail {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    background: rgba(5, 4, 8, 0.7);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
     overflow-y: auto;
-    padding: 0 0 20px;
+    padding: 40px 16px;
+}
+
+.wv-detail[hidden] {
+    display: none;
+}
+
+.wv-detail > .wv-detail-body {
+    background: var(--wv-ui);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 24px;
+    width: min(720px, 100%);
 }
 
 .wv-detail-head {
+    position: relative;
     display: flex;
     gap: 14px;
-    padding: 16px 14px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor, #333);
-    position: sticky;
-    top: 0;
-    background: var(--SmartThemeBlurTintColor, #14141f);
-    z-index: 2;
+    align-items: flex-start;
+    background: var(--wv-ui);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px 16px 0 0;
+    border-bottom: 0;
+    padding: 16px;
+}
+
+.wv-detail > .wv-detail-head + .wv-detail-body,
+.wv-detail-head + .wv-detail-body {
+    border-radius: 0 0 16px 16px;
+    margin-top: 0;
+    width: min(720px, 100%);
+}
+
+.wv-detail-head,
+.wv-detail-head + .wv-detail-body,
+.wv-detail-actions {
+    width: min(720px, 100%);
+    align-self: center;
 }
 
 .wv-detail-poster {
-    width: 110px;
-    aspect-ratio: 2 / 3;
+    width: 96px;
+    height: 128px;
     object-fit: cover;
-    border-radius: 8px;
+    border-radius: 10px;
     flex-shrink: 0;
 }
 
 .wv-detail-titlebox {
-    flex: 1;
     min-width: 0;
+    flex: 1;
 }
 
 .wv-detail-name {
-    font-size: 1.15em;
+    font-size: 20px;
     font-weight: 700;
+    color: #fff;
 }
 
 .wv-detail-sub {
-    opacity: 0.75;
-    font-size: 0.88em;
-    margin: 3px 0 8px;
+    color: var(--wv-muted);
+    font-size: 12.5px;
+    margin-top: 3px;
 }
 
 .wv-detail-tags {
     display: flex;
-    gap: 4px;
     flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 9px;
 }
 
 .wv-detail-close {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: 10px;
+    right: 10px;
+    color: #b9b6bf;
+    font-size: 18px;
 }
 
 .wv-detail-body {
-    padding: 12px 16px;
-    font-size: 0.95em;
-    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13.5px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
 }
 
 .wv-detail-body h4 {
-    margin: 14px 0 4px;
-    opacity: 0.7;
-    font-size: 0.82em;
+    color: var(--wv-accent);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    margin: 16px 0 6px;
+}
+
+.wv-detail-body h4:first-child {
+    margin-top: 0;
 }
 
 .wv-detail-pre {
     white-space: pre-wrap;
-    max-height: 260px;
-    overflow-y: auto;
-    border: 1px solid var(--SmartThemeBorderColor, #333);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 0.92em;
 }
 
 .wv-detail-actions {
-    position: sticky;
-    bottom: 0;
     display: flex;
+    justify-content: flex-end;
     gap: 10px;
-    padding: 12px 16px;
-    background: var(--SmartThemeBlurTintColor, #14141f);
-    border-top: 1px solid var(--SmartThemeBorderColor, #333);
-    z-index: 2;
+    padding: 14px 0;
+}
+
+.wv-detail-actions a,
+.wv-detail-actions button {
+    border-radius: 12px;
+    padding: 10px 16px;
+    font-size: 13.5px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.wv-detail-source {
+    background: var(--wv-glass);
+    border: 1px solid var(--wv-glass-border);
+    color: #e6e4e8;
 }
 
 .wv-import-button {
-    background: var(--SmartThemeEmColor, #4a7);
+    background: var(--wv-accent);
     color: #fff;
-    font-weight: 600;
 }
 
+/* Import-mode sheet (Glaze options sheet) */
 .wv-mode-sheet {
     position: absolute;
-    bottom: 70px;
+    bottom: 18px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 10;
+    width: min(340px, 90%);
+    background: var(--wv-ui);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 12px;
-    border: 1px solid var(--SmartThemeBorderColor, #444);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #20203a) 94%, var(--SmartThemeBodyColor, #fff) 6%);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-    min-width: 240px;
+    gap: 8px;
+    z-index: 55;
 }
 
 .wv-mode-title {
+    text-align: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.wv-mode-sheet button {
+    background: var(--wv-glass);
+    border: 1px solid var(--wv-glass-border);
+    border-radius: 10px;
+    color: #e6e4e8;
+    padding: 10px;
+    font-size: 13.5px;
     font-weight: 600;
-    margin-bottom: 2px;
 }
 
-.wv-mode-sheet button {
-    text-align: left;
-    padding: 8px 12px;
+.wv-mode-sheet button:hover {
+    background: rgba(25, 25, 26, 0.95);
 }
 
-.wv-mode-cancel {
-    opacity: 0.7;
+/* ------------------------------------------------------------------ */
+/* Responsive (panel mirrors the mockup breakpoints)                   */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 1100px) {
+    .wv-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
 }
 
-.wv-mode-sheet button {
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #20203a) 90%, var(--SmartThemeBodyColor, #fff) 10%);
-    border: 1px solid var(--SmartThemeBorderColor, #444);
-    border-radius: 6px;
-    color: var(--SmartThemeBodyColor, #e0e0e8);
+@media (max-width: 850px) {
+    .wv-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 620px) {
+    .wv-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px 10px;
+    }
+
+    .wv-syn {
+        display: none;
+    }
+
+    .wv-panel {
+        padding: 10px 10px 30px;
+    }
 }

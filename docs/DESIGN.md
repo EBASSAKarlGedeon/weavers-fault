@@ -76,8 +76,20 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    source-aware detail/FAB/ledger. Live-verified: routes + providers menu + token-sheet flow.
    A real end-to-end extraction needs the user's saucepan.ai bearer token (upstream answered
    401 Invalid token to a fake one — request format confirmed).
-5. **M5 — DataCat**: adapter behind settings key (device flow + verification lease); fallback
-   iframe-bridge mode if the client-id path fails.
+5. **M5 — DataCat** (COMPLETE 2026-11-22): official `api/client/v1` adapter. Pure port in
+   `src/endpoints/weavers-vault-datacat.js` (installation-id contract, device-flow bodies,
+   header set, /characters + two-window /fresh query shaping, sort/window resolution incl.
+   legacy keys, summary normalization, V2 reader with provenance, client-side filter
+   application, lease store, error classification) — 40 jest tests. Routes in
+   `weavers-vault-datacat-routes.js`: client id (settings field), status, search, tags,
+   character, hosted verification (start/poll), protected card+avatar transfer under a
+   process-wide lease, account link (start/poll/unlink). Extension: DataCat is a browsable
+   provider with its own sort vocabulary, verification sheet and import.
+   Glaze ships with NO client id (`--dart-define`, default empty), so the id is a
+   per-device setting here; until one is entered the source surfaces DataCat's own
+   403 ("integration is not approved or has been revoked"), which is the honest answer.
+   The iframe-bridge fallback is NOT built: the client-id path is the contract, and
+   without a key neither path can do anything.
 6. **M6 — extras**: batch queue, favorites, JannyAI-search decision (1-day timebox), polish.
 7. **v2 (separate effort)**: JanitorAI + Janny-detail via Electron webview.
 

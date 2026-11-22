@@ -990,6 +990,11 @@ function renderDetail(popup, item, character) {
     const d = character.data;
     const name = d.name || '?';
     const book = d.character_book;
+    // Glaze's Info tab reads `character.creatorNotes` (_InfoTab:1492), i.e. the
+    // card's storefront/creator notes — NOT the card body. The body is the
+    // Description block inside the Prompt Blocks tab. Rendering `description`
+    // here showed a completely different text than the real app.
+    const bioText = String(d.creator_notes ?? '').trim();
     const greetings = [d.first_mes, ...(d.alternate_greetings ?? [])].filter(g => g && g.trim());
 
     popup.innerHTML = `
@@ -1017,16 +1022,16 @@ function renderDetail(popup, item, character) {
                 <div class="wv-dtabs" data-active="0">
                     <div class="wv-dtabind"></div>
                     <button class="wv-dtab"><span class="fa-solid fa-circle-info"></span><span>Info</span></button>
-                    <button class="wv-dtab"><span class="fa-solid fa-align-left"></span><span>Prompt Blocks</span></button>
+                    <button class="wv-dtab"><span class="fa-solid fa-file-lines"></span><span>Prompt Blocks</span></button>
                     <button class="wv-dtab"><span class="fa-regular fa-images"></span><span>Images</span></button>
                 </div>
                 <div class="wv-dpanewrap">
                     <div class="wv-dpane wv-dpane-info">
                         <div class="wv-dtagwrap">${(d.tags ?? []).slice(0, 8).map(detailTagChip).join('')}</div>
-                        <div class="wv-dseclabel">Description</div>
-                        ${d.description
-                            ? `<div class="wv-bio">${escapeHtml(d.description).replace(/\n/g, '<br>')}</div>`
-                            : '<div class="wv-dnoprev">No preview available</div>'}
+                        ${bioText ? `
+                            <div class="wv-dseclabel">Description</div>
+                            <div class="wv-bio">${escapeHtml(bioText).replace(/\n/g, '<br>')}</div>`
+                            : ((d.tags ?? []).length ? '' : '<div class="wv-dnoprev">No preview available</div>')}
                     </div>
                     <div class="wv-dpane wv-dpane-prompts" hidden>
                         ${DETAIL_PROMPT_SECTIONS.filter(([k]) => d[k]).map(([k, label], i) => `

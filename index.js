@@ -917,6 +917,26 @@ let detailAbort = null;
 // floating window, EMPTY title, close button, no dim): hero 310 + floating
 // header buttons + pill tab strip + Info/Prompt Blocks/Images panes + the
 // accent Import FAB bottom-right (character_detail_screen.dart).
+/**
+ * Desktop window chrome (desktop_window_chrome.dart): title bar carries a
+ * maximize toggle (crop_square <-> fullscreen_exit) next to close. Maximizing
+ * fills the bounds with square corners, exactly like Glaze's
+ * `_maximized ? Offset.zero & bounds : ...`.
+ */
+function wireWinChrome(popup, onClose) {
+    const win = popup.querySelector('.wv-dwin');
+    const max = popup.querySelector('.wv-dmax');
+    popup.querySelector('.wv-dclose')?.addEventListener('click', onClose);
+    if (!max || !win) return;
+    max.addEventListener('click', () => {
+        const on = win.classList.toggle('wv-max');
+        max.title = on ? 'Restore' : 'Maximize';
+        max.innerHTML = on
+            ? '<span class="fa-solid fa-compress"></span>'
+            : '<span class="fa-regular fa-square"></span>';
+    });
+}
+
 async function openDetail(item, preloaded = null) {
     ensureOverlay();
     const popup = root.querySelector('.wv-detail');
@@ -925,14 +945,15 @@ async function openDetail(item, preloaded = null) {
         <div class="wv-dwin">
             <div class="wv-dwinbar">
                 <div class="wv-sheettitle"></div>
-                <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
+                <button class="wv-winbtn wv-dmax" title="Maximize"><span class="fa-regular fa-square"></span></button>
+                    <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
             </div>
             <div class="wv-dloading">
                 <span class="wv-spinner"></span>
                 <div class="wv-dphase">Loading character…</div>
             </div>
         </div>`;
-    popup.querySelector('.wv-dclose').addEventListener('click', () => { popup.hidden = true; });
+    wireWinChrome(popup, () => { popup.hidden = true; });
     detailAbort?.abort();
     detailAbort = new AbortController();
     // Saucepan items arrive with the character already extracted — no fetch.
@@ -953,6 +974,7 @@ async function openDetail(item, preloaded = null) {
             <div class="wv-dwin">
                 <div class="wv-dwinbar">
                     <div class="wv-sheettitle"></div>
+                    <button class="wv-winbtn wv-dmax" title="Maximize"><span class="fa-regular fa-square"></span></button>
                     <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
                 </div>
                 <div class="wv-derror">
@@ -961,7 +983,7 @@ async function openDetail(item, preloaded = null) {
                     <button class="wv-dretry" data-fullpath="${escapeHtml(item.fullPath)}">Try again</button>
                 </div>
             </div>`;
-        popup.querySelector('.wv-dclose').addEventListener('click', () => { popup.hidden = true; });
+        wireWinChrome(popup, () => { popup.hidden = true; });
         popup.querySelector('.wv-dretry').addEventListener('click', () => openDetail(item));
     }
 }
@@ -1001,7 +1023,8 @@ function renderDetail(popup, item, character) {
         <div class="wv-dwin">
             <div class="wv-dwinbar">
                 <div class="wv-sheettitle"></div>
-                <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
+                <button class="wv-winbtn wv-dmax" title="Maximize"><span class="fa-regular fa-square"></span></button>
+                    <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
             </div>
             <div class="wv-dscroll">
                 <div class="wv-hero">
@@ -1075,7 +1098,7 @@ function renderDetail(popup, item, character) {
 
     const win = popup.querySelector('.wv-dwin');
     const close = () => { popup.hidden = true; };
-    popup.querySelector('.wv-dclose').addEventListener('click', close);
+    wireWinChrome(popup, close);
     popup.querySelector('.wv-dback').addEventListener('click', close);
 
     // Tab strip: pill track glass, sliding active pill, equal-width budget of

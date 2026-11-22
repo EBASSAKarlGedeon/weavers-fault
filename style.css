@@ -23,7 +23,7 @@
     --wv-on-var: #B0B8C1;
     --wv-outline: #2C2D2E;
     --wv-ov: rgba(255, 255, 255, 0.1);
-    --wv-glass: rgba(25, 25, 26, 0.8);
+    --wv-glass: rgba(30, 30, 30, 0.8);
     --wv-glass-border: rgba(196, 42, 74, 0.18);
     --wv-card-border: rgba(255, 255, 255, 0.15);
     --wv-nsfw: #FF4444;
@@ -131,7 +131,7 @@
     z-index: 30;
 }
 
-.wv-glass {
+.wv-panel .wv-glass {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -148,7 +148,7 @@
     transition: background 0.15s;
 }
 
-.wv-glass:hover {
+.wv-panel .wv-glass:hover {
     background: rgba(25, 25, 26, 0.95);
 }
 
@@ -171,17 +171,18 @@
     gap: 8px;
 }
 
-.wv-iconbtn {
+.wv-panel .wv-iconbtn {
     position: relative;
     width: 32px;
     height: 32px;
     border-radius: 16px;
-    background: rgba(25, 25, 26, 0.85);
+    /* GlassSurface (list_controls.dart): tint = surface #1E1E1E @ elementOpacity
+       0.8 (not the app bg #19191A — the lighter surface fill is what makes the
+       box read against the grid), blur 12, border primary @ 0.18. */
+    background: rgba(30, 30, 30, 0.8);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    /* more defined box than the 18%-accent glass border so the controls read
-       as distinct buttons against the grid (user request, 2026-11-22) */
-    border: 1px solid rgba(255, 255, 255, 0.22);
+    border: 1px solid var(--wv-glass-border);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -191,9 +192,8 @@
     transition: background 0.15s, border-color 0.15s;
 }
 
-.wv-iconbtn:hover {
-    background: rgba(25, 25, 26, 0.95);
-    border-color: rgba(255, 255, 255, 0.34);
+.wv-panel .wv-iconbtn:hover {
+    background: rgba(30, 30, 30, 0.95);
 }
 
 .wv-badge {
@@ -219,6 +219,13 @@
 
 .wv-sortwrap {
     position: relative;
+}
+
+/* Sort chip: labelled GlassSurface — auto width, 10px horizontal padding
+   (list_controls.dart), vs the bare-icon filter button's 32px circle. */
+.wv-panel .wv-iconbtn.wv-sortbtn {
+    width: auto;
+    padding: 0 10px;
 }
 
 /* Sort picker (Glaze desktop popup): 240px glass panel, r12 */
@@ -283,7 +290,7 @@
     display: none;
 }
 
-.wv-fchip {
+.wv-panel .wv-fchip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -298,7 +305,7 @@
     flex-shrink: 0;
 }
 
-.wv-fchip-nsfw {
+.wv-panel .wv-fchip-nsfw {
     background: rgba(255, 68, 68, 0.2);
     border-color: rgba(255, 68, 68, 0.3);
     color: var(--wv-nsfw);
@@ -947,7 +954,7 @@
 
 /* FilterTagChip: stadium; unselected onSurface@5% / outlineVariant border /
    onSurfaceVariant text; selected primary@22% / primary@70% / onSurface */
-.wv-tchip {
+.wv-panel .wv-tchip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -964,11 +971,11 @@
     text-overflow: ellipsis;
 }
 
-.wv-tchip:hover {
+.wv-panel .wv-tchip:hover {
     background: rgba(225, 227, 230, 0.09);
 }
 
-.wv-tchip.wv-sel {
+.wv-panel .wv-tchip.wv-sel {
     background: rgba(196, 42, 74, 0.22);
     border-color: rgba(196, 42, 74, 0.7);
     color: var(--wv-on);
@@ -979,7 +986,7 @@
     font-size: 11px;
 }
 
-.wv-tchip.wv-addraw {
+.wv-panel .wv-tchip.wv-addraw {
     padding-left: 8px;
 }
 

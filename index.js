@@ -192,6 +192,7 @@ function ensureOverlay() {
             <div class="wv-grid"></div>
             <div class="wv-endbar"></div>
             <div class="wv-sentinel"></div>
+            <div class="wv-dcbrowser" hidden></div>
             <div class="wv-detail" hidden></div>
 
             <div class="wv-filters-overlay" hidden>
@@ -287,10 +288,16 @@ function openVault() {
     root.querySelector('.wv-search').value = s.query;
     hydrateSourceChip();
     hydrateControls();
+    applySourceLayout();
     if (!state.hydrated) {
         state.hydrated = true;
-        if (state.source === 'saucepan') showSourceHint();
+        if (state.source === 'datacat') showDatacatBrowser();
+        else if (state.source === 'saucepan') showSourceHint();
         else runSearch();
+    } else if (state.source === 'datacat') {
+        // The frame survives a close/reopen, so just make sure it is visible
+        // and still holds its browsing context.
+        showDatacatBrowser();
     }
 }
 
@@ -599,7 +606,7 @@ function hydrateControls() {
     renderActiveChips();
     const sortIcon = root.querySelector('.wv-sorticon');
     const icon = state.source === 'datacat'
-        ? (DATACAT_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')
+        ? (DATACAT_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')  // reserved for the optional REST adapter
         : (SORT_ICONS[state.sort] ?? 'fa-solid fa-sort');
     sortIcon.className = `${icon} wv-sorticon`;
     renderSortMenu();
@@ -628,6 +635,8 @@ function renderSortMenu() {
 function wireToolbar() {
     const search = root.querySelector('.wv-search');
     search.addEventListener('input', () => {
+        // DataCat is embedded: its own search bar owns the query.
+        if (state.source === 'datacat') return;
         state.query = search.value;
         settings().query = search.value;
         saveSettingsQuiet();
@@ -1027,14 +1036,6 @@ async function openDetail(item, preloaded = null) {
         return;
     }
     try {
-        if (item.source === 'datacat') {
-            // DataCat's preview *is* the card transfer (Glaze fetches the card
-            // before showing the sheet), so this can need a lease.
-            const { character, file } = await fetchDatacatCard(item, { signal: detailAbort.signal });
-            datacatFiles.set(item.id, file);
-            renderDetail(popup, item, character);
-            return;
-        }
         const r = await fetch(`/api/weavers-vault/chub/character?fullPath=${encodeURIComponent(item.fullPath)}`,
             { headers: getRequestHeaders(), signal: detailAbort.signal });
         const body = await r.json();
@@ -1248,7 +1249,6 @@ function renderDetail(popup, item, character) {
     // Import FAB → mode sheet when lorebooks exist, straight import otherwise.
     popup.querySelector('.wv-dfab').addEventListener('click', () => {
         if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
-        if (item.source === 'datacat') { importDatacatCharacter(item, character); return; }
         if (book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
@@ -1354,19 +1354,23 @@ function hydrateSourceChip() {
 }
 
 /**
- * DataCat is only browsable once a client id is stored. Asked on switch rather
- * than on the first failed search, so the source never opens onto an error.
+ * DataCat runs as an embedded browser inside the panel (the only anonymous
+ * path DataCat offers), so the search grid's furniture has to get out of its
+ * way: the site brings its own search bar, filters and sort control.
  */
-async function promptClientIdIfNeeded() {
-    try {
-        const r = await fetch('/api/weavers-vault/datacat/status', { headers: getRequestHeaders() });
-        const body = await r.json();
-        if (body?.configured) return;
-        const configured = await openDatacatClientIdSheet();
-        if (configured) resetAndSearch();
-    } catch {
-        // A failed status read leaves the search's own error to explain itself.
+function applySourceLayout() {
+    const browsing = state.source === 'datacat';
+    root.classList.toggle('wv-browsing', browsing);
+    for (const selector of ['.wv-row3', '.wv-grid', '.wv-status', '.wv-endbar', '.wv-sentinel', '.wv-right']) {
+        const el = root.querySelector(selector);
+        if (el) el.hidden = browsing;
     }
+    const search = root.querySelector('.wv-search');
+    if (search) {
+        search.hidden = browsing;
+        search.placeholder = 'Search characters...';
+    }
+    if (!browsing) hideDatacatBrowser();
 }
 
 function setSource(source) {
@@ -1397,12 +1401,16 @@ function setSource(source) {
     // The sort icon and menu are a per-provider vocabulary, so they have to be
     // re-hydrated on switch — resetAndSearch only re-renders the grid.
     hydrateControls();
-    if (source !== 'saucepan') {
-        // DataCat needs its integration id before it can be browsed: offer the
-        // field instead of letting the first search fail with a 400.
-        if (source === 'datacat') promptClientIdIfNeeded();
+    if (source === 'datacat') {
+        // The embedded site owns browsing/search/detail; there is nothing to
+        // search from here.
+        applySourceLayout();
+        showDatacatBrowser();
+    } else if (source !== 'saucepan') {
+        applySourceLayout();
         resetAndSearch();
     } else {
+        applySourceLayout();
         // Non-browsable source: clear the grid and point at the paste flow.
         state.items = [];
         const grid = root.querySelector('.wv-grid');
@@ -1413,182 +1421,272 @@ function setSource(source) {
     }
 }
 
-// ─── DataCat (M5) ──────────────────────────────────────────────────────────
-// The card transfer needs a short-lived lease from a hosted human-verification
-// challenge. A 403 carrying verificationRequired is the cue to run it, not an
-// error to report: the challenge opens in a tab and the transfer is retried.
+// ─── DataCat (M5) — iframe + postMessage bridge ────────────────────────────
+// Ported from DataCat's own SillyTavern browser extension
+// (datacat-sillytavern-browser v0.1.9, AGPL-3.0 — see docs/DESIGN.md attribution).
+//
+// This is the path that actually works without an account or a client id: the
+// site runs in an iframe (`dc_embed=st`, `dc_auth_mode=client-link`) and hands
+// a ready-made PNG card back over postMessage. Glaze's `api/client/v1` path
+// needs an integration key DataCat has to issue, so it stays as the optional
+// server-side adapter; the bridge is what the vault uses to browse.
+//
+// Protocol (parent side):
+//   parent → child  {type:'datacat:st-bridge:init', nonce, source}
+//   child  → parent {type:'datacat:st-bridge:ready', nonce}
+//   child  → parent {type:'datacat:st-character-card:prepare', nonce, requestId, metadata}
+//   parent → child  {type:'datacat:st-character-card:ack', nonce, requestId, status, message, ...}
+//   child  → parent {type:'datacat:st-character-card', nonce, requestId, metadata, png}
+//   parent → child  ack 'ok' with the imported avatar.
 
-// Cards already transferred, keyed by character id — the detail FAB imports
-// these instead of spending another lease slot.
-const datacatFiles = new Map();
+const DC_BROWSER_URL = 'https://datacat.run/characters/recent';
+const DC_CLIENT = 'datacat-browser';
+const DC_CLIENT_VERSION = '0.1.9';
+const DC_AUTH_MODE = 'client-link';
+const DC_MAX_PNG_BYTES = 32 * 1024 * 1024;
+const DC_PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const DC_CHARACTER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DC_REQUEST_ID = /^[a-zA-Z0-9._:-]{1,128}$/;
+const DC_NONCE = /^[a-zA-Z0-9-]{16,128}$/;
+const DC_PARENT_SOURCE = 'sillytavern-datacat-browser';
 
-async function fetchDatacatCard(item, { signal } = {}) {
-    const post = (url, body) => fetch(url, {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(body),
-        signal,
-    });
-    const attempt = async () => {
-        const r = await post('/api/weavers-vault/datacat/card', { id: item.id, sourceKind: item.sourceKind });
-        return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) };
-    };
+const datacatBridge = {
+    frame: null,
+    origin: null,
+    nonce: '',
+    ready: false,
+    listening: false,
+    imported: new Map(),   // datacatCharacterId → avatar filename
+    active: new Set(),     // imports in flight
+};
 
-    let res = await attempt();
-    if (!res.ok && res.body?.verificationRequired) {
-        const verified = await showDatacatVerifySheetFlow();
-        if (!verified) throw new Error('Verification cancelled');
-        res = await attempt();
+function datacatNonce() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function datacatBridgeUrl(nonce) {
+    const url = new URL(DC_BROWSER_URL);
+    url.searchParams.set('dc_embed', 'st');
+    url.searchParams.set('dc_bridge_nonce', nonce);
+    url.searchParams.set('dc_client', DC_CLIENT);
+    url.searchParams.set('dc_client_version', DC_CLIENT_VERSION);
+    url.searchParams.set('dc_auth_mode', DC_AUTH_MODE);
+    return url.href;
+}
+
+function sendDatacatBridgeInit() {
+    const win = datacatBridge.frame?.contentWindow;
+    if (!win || !datacatBridge.origin || !datacatBridge.nonce) return;
+    try {
+        win.postMessage({ type: 'datacat:st-bridge:init', nonce: datacatBridge.nonce, source: DC_PARENT_SOURCE }, datacatBridge.origin);
+    } catch (error) {
+        console.warn("[Weaver's Vault] DataCat bridge init failed:", error.message);
     }
-    if (!res.ok && res.body?.code === 'client_id_missing') {
-        const configured = await openDatacatClientIdSheet();
-        if (!configured) throw new Error('DataCat is not configured');
-        res = await attempt();
+}
+
+/** Ack back into the iframe; the site renders these as its import phases. */
+function postDatacatAck(requestId, status, message, extra = {}) {
+    const win = datacatBridge.frame?.contentWindow;
+    if (!win || !datacatBridge.origin) return;
+    try {
+        win.postMessage({
+            type: 'datacat:st-character-card:ack',
+            nonce: datacatBridge.nonce,
+            requestId,
+            status,
+            message,
+            ...extra,
+        }, datacatBridge.origin);
+    } catch (error) {
+        console.warn("[Weaver's Vault] DataCat ack failed:", error.message);
     }
-    if (!res.ok) throw new Error(res.body?.error || `DataCat answered ${res.status}`);
-    return res.body;
+}
+
+function isDatacatBridgeEvent(event) {
+    return Boolean(event?.source && datacatBridge.frame && event.source === datacatBridge.frame.contentWindow);
+}
+
+function isDatacatBridgeInitRequest(event) {
+    if (!isDatacatBridgeEvent(event)) return false;
+    const data = event.data;
+    return Boolean(data && typeof data === 'object' && data.type === 'datacat:st-bridge:init');
+}
+
+function isTrustedDatacatEvent(event) {
+    if (!isDatacatBridgeEvent(event)) return false;
+    if (event.origin !== datacatBridge.origin) return false;
+    const data = event.data;
+    return Boolean(data && typeof data === 'object' && data.nonce === datacatBridge.nonce);
+}
+
+function datacatCharacterId(metadata = {}) {
+    const id = String(metadata.datacatCharacterId || metadata.datacat_character_id
+        || metadata.characterId || metadata.character_id || '').trim().toLowerCase();
+    return DC_CHARACTER_ID.test(id) ? id : '';
+}
+
+function datacatRequestId(value) {
+    const id = String(value || '').trim();
+    return DC_REQUEST_ID.test(id) ? id : '';
+}
+
+function validateDatacatPng(payload) {
+    const isBuffer = payload instanceof ArrayBuffer;
+    if (!isBuffer) throw new Error('DataCat PNG payload is invalid.');
+    if (payload.byteLength < DC_PNG_SIGNATURE.length) throw new Error('DataCat PNG payload is too small.');
+    if (payload.byteLength > DC_MAX_PNG_BYTES) throw new Error('DataCat PNG payload exceeds the 32 MB import limit.');
+    const head = new Uint8Array(payload, 0, DC_PNG_SIGNATURE.length);
+    if (!DC_PNG_SIGNATURE.every((expected, i) => head[i] === expected)) {
+        throw new Error('DataCat payload is not a PNG file.');
+    }
+    return payload;
+}
+
+/** Opens (or re-shows) the embedded DataCat browser inside the vault panel. */
+function showDatacatBrowser() {
+    const host = root.querySelector('.wv-dcbrowser');
+    if (!host) return;
+    host.hidden = false;
+    if (!datacatBridge.frame) {
+        const nonce = datacatNonce();
+        if (!DC_NONCE.test(nonce)) return;
+        const frame = document.createElement('iframe');
+        frame.className = 'wv-dcframe';
+        frame.title = 'DataCat';
+        frame.setAttribute('allow', 'clipboard-write');
+        // Same sandbox set the official extension uses: the site needs scripts,
+        // forms and its own origin, but not top-level navigation.
+        frame.setAttribute('sandbox', 'allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts');
+        frame.src = datacatBridgeUrl(nonce);
+        datacatBridge.frame = frame;
+        datacatBridge.origin = new URL(frame.src).origin;
+        datacatBridge.nonce = nonce;
+        frame.addEventListener('load', sendDatacatBridgeInit);
+        host.appendChild(frame);
+        wireDatacatBridge();
+    }
+    sendDatacatBridgeInit();
+}
+
+function hideDatacatBrowser() {
+    const host = root.querySelector('.wv-dcbrowser');
+    if (host) host.hidden = true;
 }
 
 /**
- * Opens the hosted challenge and polls it. The app never solves the challenge
- * itself — the server hands back a URL that already carries the device code.
+ * One global listener: the iframe asks for init, then drives the import with
+ * prepare/card messages. Every message is bound to this frame *and* the nonce,
+ * so another embedded page cannot drive an import.
  */
-async function showDatacatVerifySheetFlow() {
-    const start = await fetch('/api/weavers-vault/datacat/verify/start', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({}),
-    });
-    const flow = await start.json().catch(() => ({}));
-    if (!start.ok) {
-        toastr.error(flow?.error || `DataCat answered ${start.status}`, "Weaver's Vault");
-        return false;
-    }
-    return showDatacatVerifySheet(flow);
-}
+function wireDatacatBridge() {
+    if (datacatBridge.listening) return;
+    datacatBridge.listening = true;
+    window.addEventListener('message', (event) => {
+        if (!datacatBridge.frame) return;
+        if (isDatacatBridgeInitRequest(event)) {
+            datacatBridge.origin = event.origin;
+            sendDatacatBridgeInit();
+            return;
+        }
+        if (!isTrustedDatacatEvent(event)) return;
+        const data = event.data;
 
-/** Sheet: opens the challenge, polls it at the server's interval, closes itself. */
-function showDatacatVerifySheet(flow) {
-    return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.className = 'wv-mode-overlay';
-        overlay.innerHTML = `
-            <div class="wv-modesheet wv-tokensheet">
-                <div class="wv-modehandle"></div>
-                <div class="wv-modehead">Verify to download</div>
-                <div class="wv-tokenhint">DataCat asks for a one-time human check before a card transfer. Finish it in the tab that just opened — this window closes itself once DataCat confirms.</div>
-                <button class="wv-abtn wv-abtn-neutral wv-abtn-expand wv-verifyopen" type="button">
-                    <span class="fa-solid fa-arrow-up-right-from-square wv-abtnicon"></span><span class="wv-abtnlabel">Reopen the check</span>
-                </button>
-                <button class="wv-abtn wv-abtn-neutral wv-abtn-expand wv-verifycancel" type="button">
-                    <span class="fa-solid fa-xmark wv-abtnicon"></span><span class="wv-abtnlabel">Cancel</span>
-                </button>
-            </div>`;
-        root.appendChild(overlay);
-        window.open(flow.uri, '_blank', 'noopener');
-
-        let cancelled = false;
-        let timer = null;
-        const finish = (value) => {
-            cancelled = true;
-            clearTimeout(timer);
-            overlay.remove();
-            resolve(value);
-        };
-        overlay.querySelector('.wv-verifyopen').addEventListener('click', () => window.open(flow.uri, '_blank', 'noopener'));
-        overlay.querySelector('.wv-verifycancel').addEventListener('click', () => finish(false));
-        overlay.addEventListener('click', e => { if (e.target === overlay) finish(false); });
-
-        const deadline = Date.now() + (Number(flow.expiresIn) || 600) * 1000;
-        const intervalMs = Math.max(1, Number(flow.interval) || 3) * 1000;
-        const poll = async () => {
-            if (cancelled) return;
-            if (Date.now() > deadline) {
-                toastr.error('The verification expired — try again', "Weaver's Vault");
-                finish(false);
+        if (data.type === 'datacat:st-bridge:ready') {
+            datacatBridge.ready = true;
+            return;
+        }
+        if (data.type === 'datacat:st-character-card:prepare') {
+            const requestId = datacatRequestId(data.requestId);
+            if (!requestId) return;
+            const id = datacatCharacterId(data.metadata);
+            const existing = datacatBridge.imported.get(id);
+            if (existing) {
+                postDatacatAck(requestId, 'existing', 'Found local copy.', {
+                    datacatCharacterId: id, avatar: existing, phase: 'Chat ready', step: 'existing', stepLabel: 'Open local copy',
+                });
                 return;
             }
-            try {
-                const r = await fetch('/api/weavers-vault/datacat/verify/poll', {
-                    method: 'POST',
-                    headers: getRequestHeaders(),
-                    body: JSON.stringify({ flowId: flow.id, deviceCode: flow.deviceCode }),
-                });
-                const body = await r.json().catch(() => ({}));
-                if (r.ok && body.verified) { finish(true); return; }
-                if (r.ok && body.pending) { timer = setTimeout(poll, intervalMs); return; }
-                toastr.error(body?.error || 'Verification failed', "Weaver's Vault");
-                finish(false);
-            } catch (error) {
-                toastr.error(error.message, "Weaver's Vault");
-                finish(false);
-            }
-        };
-        timer = setTimeout(poll, intervalMs);
+            // 'need-card' is the cue for the site to send the PNG.
+            postDatacatAck(requestId, 'need-card', 'Ready for PNG payload.', {
+                datacatCharacterId: id, phase: 'Card payload needed', step: 'preflight', stepLabel: 'Check local copy',
+            });
+            return;
+        }
+        if (data.type === 'datacat:st-character-card') {
+            importDatacatBridgeCard(data).catch((error) => {
+                console.error("[Weaver's Vault] DataCat import failed:", error);
+                postDatacatAck(datacatRequestId(data.requestId), 'error', error?.message || 'DataCat import failed.');
+                toastr.error(error?.message || 'DataCat import failed.', "Weaver's Vault");
+            });
+        }
+    });
+    // The site re-syncs when the tab regains focus, same as the official bridge.
+    window.addEventListener('focus', () => sendDatacatBridgeInit());
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') sendDatacatBridgeInit();
     });
 }
 
-/** Client id: a public integration id, not a login — paste it once. */
-function openDatacatClientIdSheet() {
-    return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.className = 'wv-mode-overlay';
-        overlay.innerHTML = `
-            <div class="wv-modesheet wv-tokensheet">
-                <div class="wv-modehandle"></div>
-                <div class="wv-modehead">DataCat client id</div>
-                <div class="wv-tokenhint">DataCat's Client API is keyed per integration. Paste the client id DataCat issued you — it is the public half of the integration, stored per-device and never synced. Browsing and card transfers need nothing else.</div>
-                <input class="wv-tokeninput wv-cidinput" type="text" placeholder="Client id" autocomplete="off" spellcheck="false" />
-                <button class="wv-abtn wv-abtn-primary wv-abtn-expand wv-cidsave" type="button">
-                    <span class="fa-solid fa-floppy-disk wv-abtnicon"></span><span class="wv-abtnlabel">Save client id</span>
-                </button>
-            </div>`;
-        root.appendChild(overlay);
-        const input = overlay.querySelector('.wv-cidinput');
-        input.focus();
-        const close = (value) => { overlay.remove(); resolve(value); };
-        overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
-        overlay.querySelector('.wv-cidsave').addEventListener('click', async () => {
-            const clientId = input.value.trim();
-            if (!clientId) return;
-            try {
-                const r = await fetch('/api/weavers-vault/datacat/client-id', {
-                    method: 'POST',
-                    headers: getRequestHeaders(),
-                    body: JSON.stringify({ clientId }),
-                });
-                if (!r.ok) throw new Error(`Save failed (${r.status})`);
-                close(true);
-            } catch (error) {
-                toastr.error(error.message, "Weaver's Vault");
-            }
+/** The site handed us a card: import it, then report the avatar back. */
+async function importDatacatBridgeCard(payload) {
+    const metadata = payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+    const requestId = datacatRequestId(payload?.requestId);
+    const id = datacatCharacterId(metadata);
+    if (!requestId) throw new Error('DataCat sent an invalid request id.');
+    if (!id) throw new Error('DataCat sent an invalid character id.');
+    if (datacatBridge.active.has(id)) {
+        postDatacatAck(requestId, 'processing', 'This character is already importing.', {
+            datacatCharacterId: id, phase: 'Already importing', step: 'in-progress', stepLabel: 'Wait for active import',
         });
-        input.addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('.wv-cidsave').click(); });
-    });
-}
-
-/** Import a transferred DataCat card through the same native chain as chub. */
-async function importDatacatCharacter(item, character) {
-    const file = datacatFiles.get(item.id);
-    if (!file) {
-        toastr.error('Card data missing — open the character again.', "Weaver's Vault");
         return;
     }
-    const dup = ledgerCheck(item, 'character');
-    if (dup) {
-        toastr.warning(`Imported before (${new Date(dup.at).toLocaleString()}) — importing again creates a duplicate.`, "Weaver's Vault");
-    }
-    toastr.info('Importing character…', "Weaver's Vault");
+    datacatBridge.active.add(id);
     try {
-        const bytes = Uint8Array.from(atob(file.buffer), c => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: file.fileType || 'image/png' });
-        const pngFile = new File([blob], file.fileName || `${character.data.name}.png`, { type: file.fileType || 'image/png' });
-        await importCharacter(pngFile, { importTags: false });
+        const png = validateDatacatPng(payload.png);
+        const name = String(metadata.characterName || metadata.name || 'datacat-character').trim();
+        const file = new File([png], `${name.replace(/[\\/:*?"<>|]/g, '_')}.png`, { type: 'image/png' });
+
+        postDatacatAck(requestId, 'processing', 'Importing into Loreweaver…', {
+            datacatCharacterId: id, phase: 'Importing PNG', step: 'st-import-png', stepLabel: 'Import PNG',
+        });
+        const fileName = await importCharacter(file, { importTags: false });
+
+        postDatacatAck(requestId, 'processing', 'Refreshing library…', {
+            datacatCharacterId: id, avatar: fileName, phase: 'Refreshing library', step: 'refresh-library', stepLabel: 'Refresh library',
+        });
         await getCharacters();
-        ledgerAdd(item, 'character');
-        toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
-    } catch (error) {
-        toastr.error(error.message, "Weaver's Vault import failed");
+
+        datacatBridge.imported.set(id, fileName);
+        // Provenance for the ledger + the source link, stamped the same way the
+        // other providers' imports are.
+        try {
+            await fetch('/api/characters/edit', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({
+                    avatar_url: fileName,
+                    json_data: JSON.stringify({
+                        extensions: {
+                            vault_source: 'datacat',
+                            vault_full_path: id,
+                            vault_url: `https://datacat.run/characters/${id}`,
+                        },
+                    }),
+                }),
+            });
+        } catch (error) {
+            toastr.warning('Imported, but provenance stamping failed.', "Weaver's Vault");
+            console.warn("[Weaver's Vault] DataCat provenance stamp failed:", error.message);
+        }
+
+        postDatacatAck(requestId, 'ok', 'Imported into Loreweaver.', {
+            datacatCharacterId: id, avatar: fileName, phase: 'Import done', step: 'done', stepLabel: 'Imported',
+        });
+        toastr.success(`Imported ${name}`, "Weaver's Vault");
+    } finally {
+        datacatBridge.active.delete(id);
     }
 }
 

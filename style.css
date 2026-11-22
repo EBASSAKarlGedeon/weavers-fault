@@ -1948,3 +1948,38 @@
     border: 0;
     color: inherit;
 }
+
+/* ── DataCat embedded browser (M5) ────────────────────────────────────────
+   DataCat's anonymous path is its own site in an iframe, so the frame fills
+   the panel body and the search grid's furniture steps aside. */
+/* `hidden` must actually hide: several rows declare their own `display`, which
+   outranks the UA `[hidden] { display: none }`. One scoped rule kills the class
+   of bug (the DataCat browse mode hid a row that stayed on screen). */
+#wv-root [hidden] { display: none !important; }
+
+/* The panel scrolls, so a flex:auto child collapses to 0 there: in browsing
+   mode the panel stops scrolling and the frame takes the remaining height. */
+#wv-root.wv-browsing .wv-panel { overflow: hidden; padding-bottom: 0; }
+
+.wv-dcbrowser {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    margin: 0;
+    border-top: 1px solid rgba(196, 42, 74, 0.18);
+    overflow: hidden;
+}
+
+.wv-dcbrowser[hidden] { display: none; }
+
+.wv-dcframe {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+    border: 0;
+    background: #19191a;
+    color-scheme: dark;
+}
+
+#wv-root.wv-browsing .wv-search { display: none; }
+#wv-root.wv-browsing .wv-row2 { margin-bottom: 10px; }

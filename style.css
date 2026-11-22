@@ -454,7 +454,11 @@
     display: flex;
     gap: 8px;
     height: 28px;
-    padding: 0 16px 18px;
+    /* Fixed 28px height (Glaze's SizedBox) means any padding-bottom is clipped
+       inside the box — the chips ended flush against the grid. Space below
+       must be a margin to actually exist. */
+    padding: 0 16px;
+    margin: 0 0 16px;
     overflow-x: auto;
     scrollbar-width: none;
     flex-shrink: 0;

@@ -31,7 +31,7 @@ const ICON_RESTORE = `<svg class="wv-winsvg" viewBox="0 0 24 24" width="18" heig
 const SOURCE_META = {
     chub: { label: 'Chub', img: IMG_CHUB },
     saucepan: { label: 'Saucepan', img: IMG_SAUCEPAN },
-    datacat: { label: 'Datacat', img: IMG_DATACAT },
+    datacat: { label: 'DataCat', img: IMG_DATACAT },
 };
 
 // Extracted Saucepan cards by companionId — the detail FAB import consumes these.
@@ -111,6 +111,17 @@ const SORT_ICONS = {
     rating: 'fa-solid fa-thumbs-up',
     updated: 'fa-solid fa-rotate',
 };
+// DataCat's Client API sorts a field over a time window; the server resolves
+// these keys (incl. the _week/_24h legacy form) via resolveSort.
+const DATACAT_SORTS = {
+    fresh: { label: 'Fresh', icon: 'fa-solid fa-clock-rotate-left' },
+    score: { label: 'Top rated', icon: 'fa-solid fa-thumbs-up' },
+    score_week: { label: 'Top rated this week', icon: 'fa-solid fa-arrow-trend-up' },
+    score_24h: { label: 'Top rated 24 hours', icon: 'fa-solid fa-fire' },
+    chat_count: { label: 'Most chats', icon: 'fa-solid fa-comments' },
+    messages_per_chat: { label: 'Deepest chats', icon: 'fa-solid fa-comment-dots' },
+};
+
 const SORT_LABELS = {
     popular: 'Most popular',
     trending_week: 'Trending this week',
@@ -278,8 +289,8 @@ function openVault() {
     hydrateControls();
     if (!state.hydrated) {
         state.hydrated = true;
-        if (state.source === 'chub') runSearch();
-        else showSourceHint();
+        if (state.source === 'saucepan') showSourceHint();
+        else runSearch();
     }
 }
 
@@ -354,16 +365,34 @@ function activeFilterCount() {
     return n;
 }
 
-function runSearch() {
-    const myEpoch = ++state.epoch;
-    state.loading = true;
-    state.page = state.page || 1;
-    renderStatus('Searching…');
+/**
+ * One search entry point for every browsable source. Chub pages by number;
+ * DataCat pages by offset and sorts a field over a time window, so the request
+ * shape differs while the render path stays identical.
+ */
+function searchRequest() {
     const f = state.filters ?? { ...committedFilters(), tags: new Set() };
-    fetch('/api/weavers-vault/chub/search', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
+    if (state.source === 'datacat') {
+        const perPage = settings().perPage || 24;
+        return {
+            url: '/api/weavers-vault/datacat/search',
+            source: 'DataCat',
+            body: {
+                query: state.query,
+                offset: (state.page - 1) * perPage,
+                limit: perPage,
+                // The server resolves both the field and the window from this
+                // key (score_week → {score, week}).
+                sort: state.sort,
+                tagIds: [],
+                nsfw: Boolean(f.nsfw),
+            },
+        };
+    }
+    return {
+        url: '/api/weavers-vault/chub/search',
+        source: 'chub.ai',
+        body: {
             query: state.query,
             page: state.page,
             limit: settings().perPage,
@@ -385,21 +414,35 @@ function runSearch() {
                 minAiRating: f.minAiRating,
                 minTags: f.minTags,
             },
-        }),
+        },
+    };
+}
+
+function runSearch() {
+    const myEpoch = ++state.epoch;
+    state.loading = true;
+    state.page = state.page || 1;
+    renderStatus('Searching…');
+    const { url, body, source } = searchRequest();
+    fetch(url, {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify(body),
     })
-        .then(r => r.json().then(body => ({ ok: r.ok, status: r.status, body })))
-        .then(({ ok, status, body }) => {
+        .then(r => r.json().then(payload => ({ ok: r.ok, status: r.status, payload })))
+        .then(({ ok, status, payload }) => {
             if (myEpoch !== state.epoch) return; // stale
             state.loading = false;
             if (!ok) {
                 // Party-labeled error: the source is at fault, not the app.
-                renderStatus(`chub.ai answered ${status}${body?.error ? ` — ${body.error}` : ''}`, true);
+                const detail = payload?.error ? ` — ${payload.error}` : '';
+                renderStatus(`${source} answered ${status}${detail}`, true);
                 return;
             }
-            if (state.page === 1) state.items = body.items ?? [];
-            else state.items.push(...(body.items ?? []));
-            state.total = body.total ?? state.items.length;
-            state.hasMore = Boolean(body.hasMore);
+            if (state.page === 1) state.items = payload.items ?? [];
+            else state.items.push(...(payload.items ?? []));
+            state.total = payload.total ?? state.items.length;
+            state.hasMore = Boolean(payload.hasMore);
             state.reachedEnd = state.items.length === 0 || !state.hasMore;
             renderGrid();
             renderStatus();
@@ -412,9 +455,9 @@ function runSearch() {
 }
 
 function loadMore() {
-    // Chub is the only browsable (infinite-scroll) source; clearing the grid
-    // for a non-browsable source must not drag the sentinel into a search.
-    if (state.source !== 'chub' || state.loading || state.reachedEnd) return;
+    // Only browsable sources page; clearing the grid for a paste-URL source
+    // (Saucepan) must not drag the sentinel into a search.
+    if (state.source === 'saucepan' || state.loading || state.reachedEnd) return;
     state.page += 1;
     runSearch();
 }
@@ -555,13 +598,22 @@ function hydrateControls() {
     badge.textContent = n;
     renderActiveChips();
     const sortIcon = root.querySelector('.wv-sorticon');
-    sortIcon.className = `${SORT_ICONS[state.sort] ?? 'fa-solid fa-sort'} wv-sorticon`;
+    const icon = state.source === 'datacat'
+        ? (DATACAT_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')
+        : (SORT_ICONS[state.sort] ?? 'fa-solid fa-sort');
+    sortIcon.className = `${icon} wv-sorticon`;
     renderSortMenu();
+}
+
+function sortTable() {
+    return state.source === 'datacat'
+        ? Object.fromEntries(Object.entries(DATACAT_SORTS).map(([k, v]) => [k, v.label]))
+        : SORT_LABELS;
 }
 
 function renderSortMenu() {
     const menu = root.querySelector('.wv-menu');
-    menu.innerHTML = Object.entries(SORT_LABELS).map(([key, label]) =>
+    menu.innerHTML = Object.entries(sortTable()).map(([key, label]) =>
         `<button data-sort="${key}" class="${key === state.sort ? 'wv-on' : ''}">${label}</button>`).join('');
     menu.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
         state.sort = b.dataset.sort;
@@ -975,6 +1027,14 @@ async function openDetail(item, preloaded = null) {
         return;
     }
     try {
+        if (item.source === 'datacat') {
+            // DataCat's preview *is* the card transfer (Glaze fetches the card
+            // before showing the sheet), so this can need a lease.
+            const { character, file } = await fetchDatacatCard(item, { signal: detailAbort.signal });
+            datacatFiles.set(item.id, file);
+            renderDetail(popup, item, character);
+            return;
+        }
         const r = await fetch(`/api/weavers-vault/chub/character?fullPath=${encodeURIComponent(item.fullPath)}`,
             { headers: getRequestHeaders(), signal: detailAbort.signal });
         const body = await r.json();
@@ -992,7 +1052,7 @@ async function openDetail(item, preloaded = null) {
                 </div>
                 <div class="wv-derror">
                     <span class="fa-solid fa-triangle-exclamation wv-derricon"></span>
-                    <div class="wv-derrmsg">chub.ai failed — ${escapeHtml(error.message)}</div>
+                    <div class="wv-derrmsg">${item.source === 'datacat' ? 'DataCat' : 'chub.ai'} failed — ${escapeHtml(error.message)}</div>
                     <button class="wv-dretry" data-fullpath="${escapeHtml(item.fullPath)}">Try again</button>
                 </div>
             </div>`;
@@ -1051,7 +1111,11 @@ function renderDetail(popup, item, character) {
                     <div class="wv-herocap">
                         <div class="wv-heroname">${escapeHtml(name)}</div>
                         ${d.creator
-                            ? `<a class="wv-heroauthor" href="${item.source === 'saucepan' ? 'https://saucepan.ai/companion/' + encodeURIComponent(item.fullPath ?? '') : 'https://chub.ai/' + escapeHtml((item.fullPath || '').split('/')[0])}" target="_blank" rel="noopener noreferrer">@${escapeHtml(d.creator)}</a>`
+                            ? `<a class="wv-heroauthor" href="${item.source === 'saucepan'
+                                ? 'https://saucepan.ai/companion/' + encodeURIComponent(item.fullPath ?? '')
+                                : item.source === 'datacat'
+                                    ? 'https://datacat.run/creators/' + encodeURIComponent(item.creatorId || d.creator)
+                                    : 'https://chub.ai/' + escapeHtml((item.fullPath || '').split('/')[0])}" target="_blank" rel="noopener noreferrer">@${escapeHtml(d.creator)}</a>`
                             : (item.source === 'saucepan' ? '' : `<span class="wv-heroauthor">@${escapeHtml((item.fullPath || '').split('/')[0])}</span>`)}
                     </div>
                 </div>
@@ -1169,6 +1233,8 @@ function renderDetail(popup, item, character) {
                 heroImg?.classList.remove('wv-blurred');
             } else if (item.source === 'saucepan') {
                 window.open(`https://saucepan.ai/companion/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
+            } else if (item.source === 'datacat') {
+                window.open(`https://datacat.run/characters/${encodeURIComponent(item.id)}`, '_blank', 'noopener');
             } else {
                 window.open(`https://chub.ai/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             }
@@ -1182,6 +1248,7 @@ function renderDetail(popup, item, character) {
     // Import FAB → mode sheet when lorebooks exist, straight import otherwise.
     popup.querySelector('.wv-dfab').addEventListener('click', () => {
         if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
+        if (item.source === 'datacat') { importDatacatCharacter(item, character); return; }
         if (book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
@@ -1256,16 +1323,15 @@ function showSourceMenu() {
     pop.innerHTML = `
         <div class="wv-srchead">Providers</div>
         ${Object.entries(SOURCE_META).map(([id, meta]) => `
-            <button class="wv-srcrow ${id === state.source ? 'wv-on' : ''} ${id === 'datacat' ? 'wv-srcdisabled' : ''}" data-source="${id}" ${id === 'datacat' ? 'disabled' : ''}>
+            <button class="wv-srcrow ${id === state.source ? 'wv-on' : ''}" data-source="${id}">
                 <img src="${meta.img}" width="18" height="18" alt="" />
                 <span class="wv-srclabel">${meta.label}</span>
-                ${id === 'datacat' ? '<span class="wv-srcsoon">M5</span>' : ''}
             </button>`).join('')}`;
     root.appendChild(pop);
     const chip = root.querySelector('.wv-source').getBoundingClientRect();
     pop.style.left = `${Math.round(chip.left)}px`;
     pop.style.top = `${Math.round(chip.bottom + 6)}px`;
-    pop.querySelectorAll('.wv-srcrow:not(.wv-srcdisabled)').forEach(b => b.addEventListener('click', () => {
+    pop.querySelectorAll('.wv-srcrow').forEach(b => b.addEventListener('click', () => {
         pop.remove();
         setSource(b.dataset.source);
     }));
@@ -1282,11 +1348,29 @@ function hydrateSourceChip() {
     chip.querySelector('img').src = meta.img;
     chip.querySelector('.wv-srclabel').textContent = meta.label;
     const search = root.querySelector('.wv-search');
-    search.placeholder = state.source === 'saucepan' ? 'Paste a saucepan.ai companion URL…' : 'Search characters...';
+    search.placeholder = state.source === 'saucepan'
+        ? 'Paste a saucepan.ai companion URL…'
+        : 'Search characters...';
+}
+
+/**
+ * DataCat is only browsable once a client id is stored. Asked on switch rather
+ * than on the first failed search, so the source never opens onto an error.
+ */
+async function promptClientIdIfNeeded() {
+    try {
+        const r = await fetch('/api/weavers-vault/datacat/status', { headers: getRequestHeaders() });
+        const body = await r.json();
+        if (body?.configured) return;
+        const configured = await openDatacatClientIdSheet();
+        if (configured) resetAndSearch();
+    } catch {
+        // A failed status read leaves the search's own error to explain itself.
+    }
 }
 
 function setSource(source) {
-    if (!SOURCE_META[source] || source === 'datacat') return;
+    if (!SOURCE_META[source]) return;
     if (state.source !== source) {
         // A provider switch starts clean: the typed text and tag selections
         // belong to the previous provider (chub topics mean nothing on
@@ -1297,12 +1381,26 @@ function setSource(source) {
         if (search) search.value = '';
         state.filters = { ...committedFilters(), tagNames: [], tags: new Set() };
         commitFilters();
+        // Sorts are a per-provider vocabulary: keep the key only when the new
+        // source knows it, else fall back to that source's default order.
+        const known = source === 'datacat' ? DATACAT_SORTS : SORT_LABELS;
+        if (!known[state.sort]) {
+            state.sort = source === 'datacat' ? 'fresh' : 'popular';
+            settings().sort = state.sort;
+            saveSettingsQuiet();
+        }
     }
     state.source = source;
     settings().source = source;
     saveSettingsQuiet();
     hydrateSourceChip();
-    if (source === 'chub') {
+    // The sort icon and menu are a per-provider vocabulary, so they have to be
+    // re-hydrated on switch — resetAndSearch only re-renders the grid.
+    hydrateControls();
+    if (source !== 'saucepan') {
+        // DataCat needs its integration id before it can be browsed: offer the
+        // field instead of letting the first search fail with a 400.
+        if (source === 'datacat') promptClientIdIfNeeded();
         resetAndSearch();
     } else {
         // Non-browsable source: clear the grid and point at the paste flow.
@@ -1312,6 +1410,185 @@ function setSource(source) {
         const status = root.querySelector('.wv-status');
         status.classList.remove('wv-status-error');
         status.textContent = 'Paste a saucepan.ai companion URL above to import';
+    }
+}
+
+// ─── DataCat (M5) ──────────────────────────────────────────────────────────
+// The card transfer needs a short-lived lease from a hosted human-verification
+// challenge. A 403 carrying verificationRequired is the cue to run it, not an
+// error to report: the challenge opens in a tab and the transfer is retried.
+
+// Cards already transferred, keyed by character id — the detail FAB imports
+// these instead of spending another lease slot.
+const datacatFiles = new Map();
+
+async function fetchDatacatCard(item, { signal } = {}) {
+    const post = (url, body) => fetch(url, {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify(body),
+        signal,
+    });
+    const attempt = async () => {
+        const r = await post('/api/weavers-vault/datacat/card', { id: item.id, sourceKind: item.sourceKind });
+        return { ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) };
+    };
+
+    let res = await attempt();
+    if (!res.ok && res.body?.verificationRequired) {
+        const verified = await showDatacatVerifySheetFlow();
+        if (!verified) throw new Error('Verification cancelled');
+        res = await attempt();
+    }
+    if (!res.ok && res.body?.code === 'client_id_missing') {
+        const configured = await openDatacatClientIdSheet();
+        if (!configured) throw new Error('DataCat is not configured');
+        res = await attempt();
+    }
+    if (!res.ok) throw new Error(res.body?.error || `DataCat answered ${res.status}`);
+    return res.body;
+}
+
+/**
+ * Opens the hosted challenge and polls it. The app never solves the challenge
+ * itself — the server hands back a URL that already carries the device code.
+ */
+async function showDatacatVerifySheetFlow() {
+    const start = await fetch('/api/weavers-vault/datacat/verify/start', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({}),
+    });
+    const flow = await start.json().catch(() => ({}));
+    if (!start.ok) {
+        toastr.error(flow?.error || `DataCat answered ${start.status}`, "Weaver's Vault");
+        return false;
+    }
+    return showDatacatVerifySheet(flow);
+}
+
+/** Sheet: opens the challenge, polls it at the server's interval, closes itself. */
+function showDatacatVerifySheet(flow) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'wv-mode-overlay';
+        overlay.innerHTML = `
+            <div class="wv-modesheet wv-tokensheet">
+                <div class="wv-modehandle"></div>
+                <div class="wv-modehead">Verify to download</div>
+                <div class="wv-tokenhint">DataCat asks for a one-time human check before a card transfer. Finish it in the tab that just opened — this window closes itself once DataCat confirms.</div>
+                <button class="wv-abtn wv-abtn-neutral wv-abtn-expand wv-verifyopen" type="button">
+                    <span class="fa-solid fa-arrow-up-right-from-square wv-abtnicon"></span><span class="wv-abtnlabel">Reopen the check</span>
+                </button>
+                <button class="wv-abtn wv-abtn-neutral wv-abtn-expand wv-verifycancel" type="button">
+                    <span class="fa-solid fa-xmark wv-abtnicon"></span><span class="wv-abtnlabel">Cancel</span>
+                </button>
+            </div>`;
+        root.appendChild(overlay);
+        window.open(flow.uri, '_blank', 'noopener');
+
+        let cancelled = false;
+        let timer = null;
+        const finish = (value) => {
+            cancelled = true;
+            clearTimeout(timer);
+            overlay.remove();
+            resolve(value);
+        };
+        overlay.querySelector('.wv-verifyopen').addEventListener('click', () => window.open(flow.uri, '_blank', 'noopener'));
+        overlay.querySelector('.wv-verifycancel').addEventListener('click', () => finish(false));
+        overlay.addEventListener('click', e => { if (e.target === overlay) finish(false); });
+
+        const deadline = Date.now() + (Number(flow.expiresIn) || 600) * 1000;
+        const intervalMs = Math.max(1, Number(flow.interval) || 3) * 1000;
+        const poll = async () => {
+            if (cancelled) return;
+            if (Date.now() > deadline) {
+                toastr.error('The verification expired — try again', "Weaver's Vault");
+                finish(false);
+                return;
+            }
+            try {
+                const r = await fetch('/api/weavers-vault/datacat/verify/poll', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ flowId: flow.id, deviceCode: flow.deviceCode }),
+                });
+                const body = await r.json().catch(() => ({}));
+                if (r.ok && body.verified) { finish(true); return; }
+                if (r.ok && body.pending) { timer = setTimeout(poll, intervalMs); return; }
+                toastr.error(body?.error || 'Verification failed', "Weaver's Vault");
+                finish(false);
+            } catch (error) {
+                toastr.error(error.message, "Weaver's Vault");
+                finish(false);
+            }
+        };
+        timer = setTimeout(poll, intervalMs);
+    });
+}
+
+/** Client id: a public integration id, not a login — paste it once. */
+function openDatacatClientIdSheet() {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'wv-mode-overlay';
+        overlay.innerHTML = `
+            <div class="wv-modesheet wv-tokensheet">
+                <div class="wv-modehandle"></div>
+                <div class="wv-modehead">DataCat client id</div>
+                <div class="wv-tokenhint">DataCat's Client API is keyed per integration. Paste the client id DataCat issued you — it is the public half of the integration, stored per-device and never synced. Browsing and card transfers need nothing else.</div>
+                <input class="wv-tokeninput wv-cidinput" type="text" placeholder="Client id" autocomplete="off" spellcheck="false" />
+                <button class="wv-abtn wv-abtn-primary wv-abtn-expand wv-cidsave" type="button">
+                    <span class="fa-solid fa-floppy-disk wv-abtnicon"></span><span class="wv-abtnlabel">Save client id</span>
+                </button>
+            </div>`;
+        root.appendChild(overlay);
+        const input = overlay.querySelector('.wv-cidinput');
+        input.focus();
+        const close = (value) => { overlay.remove(); resolve(value); };
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
+        overlay.querySelector('.wv-cidsave').addEventListener('click', async () => {
+            const clientId = input.value.trim();
+            if (!clientId) return;
+            try {
+                const r = await fetch('/api/weavers-vault/datacat/client-id', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ clientId }),
+                });
+                if (!r.ok) throw new Error(`Save failed (${r.status})`);
+                close(true);
+            } catch (error) {
+                toastr.error(error.message, "Weaver's Vault");
+            }
+        });
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('.wv-cidsave').click(); });
+    });
+}
+
+/** Import a transferred DataCat card through the same native chain as chub. */
+async function importDatacatCharacter(item, character) {
+    const file = datacatFiles.get(item.id);
+    if (!file) {
+        toastr.error('Card data missing — open the character again.', "Weaver's Vault");
+        return;
+    }
+    const dup = ledgerCheck(item, 'character');
+    if (dup) {
+        toastr.warning(`Imported before (${new Date(dup.at).toLocaleString()}) — importing again creates a duplicate.`, "Weaver's Vault");
+    }
+    toastr.info('Importing character…', "Weaver's Vault");
+    try {
+        const bytes = Uint8Array.from(atob(file.buffer), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: file.fileType || 'image/png' });
+        const pngFile = new File([blob], file.fileName || `${character.data.name}.png`, { type: file.fileType || 'image/png' });
+        await importCharacter(pngFile, { importTags: false });
+        await getCharacters();
+        ledgerAdd(item, 'character');
+        toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
+    } catch (error) {
+        toastr.error(error.message, "Weaver's Vault import failed");
     }
 }
 

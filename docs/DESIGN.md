@@ -68,7 +68,14 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    guard, NSFW toggle. Screenshot-verified (rpge-heavy convention).
 3. **M3 — detail popup + chub import**: preview, ST V2 assembly, native import (card PNG/JSON +
    embedded book), provenance, ledger, open-after-import.
-4. **M4 — Saucepan**: paste-URL extraction + fragment reassembly port + URL import dialog.
+4. **M4 — Saucepan** (COMPLETE 2026-11-22): paste-URL extraction + fragment reassembly port + URL
+   import dialog. Pure logic in `src/endpoints/weavers-vault-saucepan.js` (FNV-1a proof scheme
+   ported from saucepan_extractor.dart, Math.imul >>>0 32-bit math), 13 jest tests incl. an
+   independent BigInt reference hash. Routes: paste-token (Q14), status, extract → card PNG.
+   Extension: Providers popup (chub/saucepan/datacat), paste-URL auto-import, token sheet,
+   source-aware detail/FAB/ledger. Live-verified: routes + providers menu + token-sheet flow.
+   A real end-to-end extraction needs the user's saucepan.ai bearer token (upstream answered
+   401 Invalid token to a fake one — request format confirmed).
 5. **M5 — DataCat**: adapter behind settings key (device flow + verification lease); fallback
    iframe-bridge mode if the client-id path fails.
 6. **M6 — extras**: batch queue, favorites, JannyAI-search decision (1-day timebox), polish.

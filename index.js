@@ -1326,44 +1326,75 @@ async function importSaucepanUrl(url) {
 }
 
 // Paste-only bearer token (DESIGN.md Q14) — a small sheet, not a login form.
+// Saucepan login sheet (saucepan_login_sheet.dart): handle + password is the
+// primary path (mints the bearer token server-side, password never stored);
+// paste-token is the fallback toggle, exactly like Glaze's form.
 function openSaucepanTokenSheet(retryUrl) {
     const overlay = document.createElement('div');
     overlay.className = 'wv-mode-overlay';
     overlay.innerHTML = `
         <div class="wv-modesheet wv-tokensheet">
             <div class="wv-modehandle"></div>
-            <div class="wv-modehead">Saucepan token</div>
-            <div class="wv-tokenhint">Paste your saucepan.ai bearer token. It is stored per-device in Loreweaver's secrets and never synced.</div>
-            <input class="wv-tokeninput" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false" />
+            <div class="wv-modehead">Log in to Saucepan</div>
+            <div class="wv-tokenhint">Extraction pulls the companion definition under your account and reassembles it. Credentials go only to saucepan.ai; the minted token is stored per-device in Loreweaver's secrets and never synced.</div>
+            <div class="wv-loginfields">
+                <input class="wv-tokeninput wv-loginhandle" type="text" placeholder="Handle" autocomplete="off" spellcheck="false" />
+                <input class="wv-tokeninput wv-loginpass" type="password" placeholder="Password" autocomplete="off" spellcheck="false" />
+            </div>
+            <input class="wv-tokeninput wv-logintoken" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false" hidden />
             <div class="wv-tokenrow">
                 <button class="wv-tokencancel">Not now</button>
-                <button class="wv-tokensave">Save</button>
+                <button class="wv-tokenswap wv-tokenswapmode" title="Use a bearer token instead">Use a bearer token instead</button>
+                <button class="wv-tokensave">Log in</button>
             </div>
         </div>`;
     root.appendChild(overlay);
-    const input = overlay.querySelector('.wv-tokeninput');
-    input.focus();
+    const handle = overlay.querySelector('.wv-loginhandle');
+    const pass = overlay.querySelector('.wv-loginpass');
+    const token = overlay.querySelector('.wv-logintoken');
+    const swap = overlay.querySelector('.wv-tokenswap');
+    const save = overlay.querySelector('.wv-tokensave');
+    handle.focus();
     overlay.querySelector('.wv-tokencancel').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelector('.wv-tokensave').addEventListener('click', async () => {
-        const token = input.value.trim();
-        if (!token) return;
+    swap.addEventListener('click', () => {
+        const toToken = token.hidden;
+        token.hidden = !toToken;
+        overlay.querySelector('.wv-loginfields').hidden = toToken;
+        swap.textContent = toToken ? 'Log in with handle instead' : 'Use a bearer token instead';
+        save.textContent = toToken ? 'Save' : 'Log in';
+        (toToken ? token : handle).focus();
+    });
+    const submit = async () => {
+        const useToken = !token.hidden;
         try {
-            const r = await fetch('/api/weavers-vault/saucepan/token', {
-                method: 'POST',
-                headers: getRequestHeaders(),
-                body: JSON.stringify({ token }),
-            });
-            if (!r.ok) throw new Error(`Token save failed (${r.status})`);
+            let r;
+            if (useToken) {
+                if (!token.value.trim()) return;
+                r = await fetch('/api/weavers-vault/saucepan/token', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ token: token.value.trim() }),
+                });
+            } else {
+                if (!handle.value.trim() || !pass.value) return;
+                r = await fetch('/api/weavers-vault/saucepan/login', {
+                    method: 'POST',
+                    headers: getRequestHeaders(),
+                    body: JSON.stringify({ handle: handle.value.trim(), password: pass.value }),
+                });
+            }
+            if (!r.ok) throw new Error(((await r.json().catch(() => null))?.error) ?? `Login failed (${r.status})`);
             overlay.remove();
-            toastr.success('Saucepan token saved', "Weaver's Vault");
+            toastr.success('Signed in to Saucepan', "Weaver's Vault");
             if (retryUrl) importSaucepanUrl(retryUrl);
         } catch (error) {
             toastr.error(error.message, "Weaver's Vault");
         }
-    });
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') overlay.querySelector('.wv-tokensave').click();
+    };
+    save.addEventListener('click', submit);
+    overlay.addEventListener('keydown', e => {
+        if (e.key === 'Enter') submit();
     });
 }
 

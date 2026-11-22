@@ -317,6 +317,13 @@
 .wv-tokenrow {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
+.wv-loginfields {
+    display: flex;
+    flex-direction: column;
     gap: 8px;
 }
 

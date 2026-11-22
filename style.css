@@ -327,6 +327,11 @@
     gap: 8px;
 }
 
+/* display:flex would override the hidden attribute's UA display:none */
+.wv-loginfields[hidden] {
+    display: none;
+}
+
 .wv-tokenrow button {
     font-size: 13px;
     font-weight: 600;

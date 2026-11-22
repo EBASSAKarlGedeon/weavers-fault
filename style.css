@@ -125,7 +125,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px 0;
+    padding: 12px 16px 12px;
     flex-shrink: 0;
     /* keep the controls row (and its dropdown) above the card grid */
     z-index: 30;
@@ -176,21 +176,24 @@
     width: 32px;
     height: 32px;
     border-radius: 16px;
-    background: var(--wv-glass);
+    background: rgba(25, 25, 26, 0.85);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--wv-glass-border);
+    /* more defined box than the 18%-accent glass border so the controls read
+       as distinct buttons against the grid (user request, 2026-11-22) */
+    border: 1px solid rgba(255, 255, 255, 0.22);
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 2px;
     color: var(--wv-accent);
     font-size: 15px;
-    transition: background 0.15s;
+    transition: background 0.15s, border-color 0.15s;
 }
 
 .wv-iconbtn:hover {
     background: rgba(25, 25, 26, 0.95);
+    border-color: rgba(255, 255, 255, 0.34);
 }
 
 .wv-badge {
@@ -270,7 +273,7 @@
     display: flex;
     gap: 8px;
     height: 28px;
-    padding: 12px 16px 0;
+    padding: 0 16px 12px;
     overflow-x: auto;
     scrollbar-width: none;
     flex-shrink: 0;

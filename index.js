@@ -139,7 +139,7 @@ function ensureOverlay() {
                 </button>
                 <div class="wv-right">
                     <button class="wv-iconbtn wv-filterbtn" title="Filters" aria-label="Filters">
-                        <span class="fa-solid fa-filter-list"></span>
+                        <span class="fa-solid fa-bars-staggered"></span>
                         <span class="wv-badge" hidden></span>
                     </button>
                     <div class="wv-sortwrap">
@@ -745,7 +745,7 @@ async function ensureTagCloud() {
         const r = await fetch('/api/weavers-vault/chub/tags', {
             method: 'POST',
             headers: getRequestHeaders(),
-            body: JSON.stringify({ limit: 300, sort: 'n_projects', nsfw: true, nsfl: true }),
+            body: JSON.stringify({ limit: 500, sort: 'n_projects', nsfw: true, nsfl: true }),
         });
         const body = await r.json();
         if (r.ok) state.tagCloud = (body.tags ?? []).map(t => t.name);

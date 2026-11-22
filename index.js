@@ -363,7 +363,7 @@ function runSearch() {
             limit: settings().perPage,
             sort: state.sort,
             nsfw: f.nsfw,
-            nsfl: false, // account-scoped on chub; v2 alongside the chub key
+            nsfl: Boolean(f.nsfl),
             topics: [...f.tags],
             minTokens: f.minTokens,
             maxTokens: f.maxTokens,
@@ -637,9 +637,7 @@ function wireToolbar() {
     // Switch rows (toggle rows inside group cards)
     root.querySelectorAll('.wv-sheetbody input[data-filter]').forEach(box => {
         box.addEventListener('change', () => {
-            const key = box.dataset.filter;
-            if (key === 'nsfl') { box.checked = false; showNsflWarning(); return; }
-            state.filters[key] = box.checked;
+            state.filters[box.dataset.filter] = box.checked;
         });
     });
 
@@ -689,7 +687,6 @@ function openFilterSheet() {
     state.filters = { ...state.filters, tags: new Set(state.filters.tags) };
     const f = state.filters;
     root.querySelectorAll('.wv-sheetbody input[data-filter]').forEach(box => {
-        if (box.dataset.filter === 'nsfl') { box.checked = false; return; }
         box.checked = Boolean(f[box.dataset.filter]);
     });
     root.querySelector('.wv-mintok').value = f.minTokens;
@@ -751,6 +748,7 @@ function commitFilters() {
     const f = committedFilters();
     Object.assign(f, {
         nsfw: draft.nsfw,
+        nsfl: Boolean(draft.nsfl),
         nsfwOnly: draft.nsfwOnly,
         minTokens: draft.minTokens,
         maxTokens: draft.maxTokens,
@@ -769,32 +767,6 @@ function commitFilters() {
     state.filters = { ...f, tags: new Set(f.tagNames) };
     saveSettingsQuiet();
     hydrateControls();
-}
-
-// Glaze's NSFL gate: the public chub API silently ignores NSFL without an
-// account, so flipping it on opens the content-warning sheet instead.
-function showNsflWarning() {
-    const overlay = document.createElement('div');
-    overlay.className = 'wv-subsheet-overlay';
-    overlay.innerHTML = `
-        <div class="wv-subsheet">
-            <div class="wv-subsheet-head">NSFL Content Warning</div>
-            <div class="wv-biginfo">
-                <span class="fa-solid fa-triangle-exclamation wv-biginfo-icon"></span>
-                <p>Trust me, you don't want to do this.</p>
-            </div>
-            <div class="wv-sheetitems">
-                <button class="wv-sheetitem wv-danger" data-act="confirm">I have nothing to lose</button>
-                <button class="wv-sheetitem" data-act="cancel">I'm too young to die</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.addEventListener('click', e => {
-        const act = e.target?.closest('button')?.dataset?.act;
-        if (!act && e.target !== overlay) return;
-        overlay.remove();
-    });
 }
 
 async function ensureTagCloud() {
@@ -1274,6 +1246,17 @@ function hydrateSourceChip() {
 
 function setSource(source) {
     if (!SOURCE_META[source] || source === 'datacat') return;
+    if (state.source !== source) {
+        // A provider switch starts clean: the typed text and tag selections
+        // belong to the previous provider (chub topics mean nothing on
+        // Saucepan, and a pasted link is not a search query for chub).
+        state.query = '';
+        settings().query = '';
+        const search = root.querySelector('.wv-search');
+        if (search) search.value = '';
+        state.filters = { ...committedFilters(), tagNames: [], tags: new Set() };
+        commitFilters();
+    }
     state.source = source;
     settings().source = source;
     saveSettingsQuiet();

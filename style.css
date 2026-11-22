@@ -289,8 +289,12 @@
 /* Saucepan login sheet — Glaze recipes: fields = Material InputDecorationTheme
    (fill surfaceContainerHighest #1E1E1E, outline border, radius 12), buttons
    = GlazeActionButton (primary = accent@18% tint + accent@22% border,
-   neutral = surface fill + onSurface@22% border, radius 14, 13px w600). */
+   neutral = surface fill + onSurface@22% border, radius 14, 13px w600).
+   .wv-modesheet is a plain block, so this variant opts into flex itself —
+   without it `gap` is inert and every row sits flush. */
 .wv-tokensheet {
+    display: flex;
+    flex-direction: column;
     gap: 14px;
     padding-top: 20px;
     width: min(92vw, 480px);
@@ -305,6 +309,7 @@
     color: var(--wv-on-var);
     line-height: 1.5;
     padding: 0 24px;
+    margin-bottom: 2px;
 }
 
 .wv-tokeninput {
@@ -341,6 +346,7 @@
 
 .wv-tokensheet .wv-tokeninput.wv-logintoken {
     margin: 0 24px;
+    width: auto;
 }
 
 .wv-abtn {
@@ -360,7 +366,8 @@
 }
 
 .wv-abtn.wv-abtn-expand {
-    width: calc(100% - 48px);
+    width: auto;
+    align-self: stretch;
     margin: 0 24px;
 }
 

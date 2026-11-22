@@ -20,6 +20,12 @@ const IMG_CHUB = new URL('chub.png', import.meta.url).href;
 const IMG_SAUCEPAN = new URL('saucepan.svg', import.meta.url).href;
 const IMG_DATACAT = new URL('datacat.png', import.meta.url).href;
 
+// Window-chrome glyphs, drawn inline to match Glaze's Material icons
+// (`Icons.crop_square_rounded` / `Icons.fullscreen_exit_rounded`) instead of
+// Font Awesome's hairline fa-square, which is sharp-cornered and much lighter.
+const ICON_MAXIMIZE = `<svg class="wv-winsvg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><rect x="4" y="4" width="16" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+const ICON_RESTORE = `<svg class="wv-winsvg" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>`;
+
 // Provider switch (Glaze Providers popup): Datacat ships in M5 — the row is
 // shown but disabled, exactly like an unbuilt milestone should be.
 const SOURCE_META = {
@@ -182,7 +188,7 @@ function ensureOverlay() {
                     <div class="wv-sheetbar">
                         <span class="wv-sheettitle">Filters</span>
                         <span class="wv-spacer"></span>
-                        <button class="wv-winbtn" data-win="max" title="Maximize (visual only)" aria-label="Maximize"><span class="fa-regular fa-square"></span></button>
+                        <button class="wv-winbtn wv-fmax" title="Maximize" aria-label="Maximize">${ICON_MAXIMIZE}</button>
                         <button class="wv-winbtn wv-mclose" title="Close" aria-label="Close filters"><span class="fa-solid fa-xmark"></span></button>
                     </div>
                     <div class="wv-sheetbody">
@@ -613,6 +619,13 @@ function wireToolbar() {
     const overlay = root.querySelector('.wv-filters-overlay');
     root.querySelector('.wv-filterbtn').addEventListener('click', () => openFilterSheet());
     root.querySelector('.wv-mclose').addEventListener('click', () => closeFilterSheet());
+    root.querySelector('.wv-fmax').addEventListener('click', () => {
+        const modal = root.querySelector('.wv-modal');
+        const on = modal.classList.toggle('wv-max');
+        const b = root.querySelector('.wv-fmax');
+        b.title = on ? 'Restore' : 'Maximize';
+        b.innerHTML = on ? ICON_RESTORE : ICON_MAXIMIZE;
+    });
     overlay.addEventListener('click', e => { if (e.target === overlay) closeFilterSheet(); });
 
     // Collapsible "Must include" group (Glaze MenuCollapsibleSection)
@@ -932,8 +945,8 @@ function wireWinChrome(popup, onClose) {
         const on = win.classList.toggle('wv-max');
         max.title = on ? 'Restore' : 'Maximize';
         max.innerHTML = on
-            ? '<span class="fa-solid fa-compress"></span>'
-            : '<span class="fa-regular fa-square"></span>';
+            ? ICON_RESTORE
+            : ICON_MAXIMIZE;
     });
 }
 
@@ -945,7 +958,7 @@ async function openDetail(item, preloaded = null) {
         <div class="wv-dwin">
             <div class="wv-dwinbar">
                 <div class="wv-sheettitle"></div>
-                <button class="wv-winbtn wv-dmax" title="Maximize"><span class="fa-regular fa-square"></span></button>
+                <button class="wv-winbtn wv-dmax" title="Maximize">${ICON_MAXIMIZE}</button>
                     <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
             </div>
             <div class="wv-dloading">
@@ -974,7 +987,7 @@ async function openDetail(item, preloaded = null) {
             <div class="wv-dwin">
                 <div class="wv-dwinbar">
                     <div class="wv-sheettitle"></div>
-                    <button class="wv-winbtn wv-dmax" title="Maximize"><span class="fa-regular fa-square"></span></button>
+                    <button class="wv-winbtn wv-dmax" title="Maximize">${ICON_MAXIMIZE}</button>
                     <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
                 </div>
                 <div class="wv-derror">
@@ -1023,7 +1036,7 @@ function renderDetail(popup, item, character) {
         <div class="wv-dwin">
             <div class="wv-dwinbar">
                 <div class="wv-sheettitle"></div>
-                <button class="wv-winbtn wv-dmax" title="Maximize"><span class="fa-regular fa-square"></span></button>
+                <button class="wv-winbtn wv-dmax" title="Maximize">${ICON_MAXIMIZE}</button>
                     <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
             </div>
             <div class="wv-dscroll">

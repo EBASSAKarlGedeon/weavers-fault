@@ -221,6 +221,122 @@
     position: relative;
 }
 
+/* Providers popup (source chip): same glass panel as the sort menu, rows with
+   provider logo + label + active check / M5 badge. Inline left positioning
+   must cancel the base .wv-menu right:0 or auto width stretches full panel. */
+.wv-srcmenu {
+    z-index: 40;
+    right: auto;
+    width: max-content;
+    min-width: 200px;
+    padding: 6px;
+}
+
+.wv-srchead {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--wv-accent);
+    padding: 6px 10px 8px;
+}
+
+.wv-srcrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    text-align: left;
+    padding: 9px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--wv-on);
+}
+
+.wv-srcrow img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+}
+
+.wv-srcrow .wv-srclabel {
+    flex: 1;
+}
+
+.wv-srcrow:hover:not(.wv-srcdisabled) {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.wv-srcrow.wv-srcdisabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.wv-srccheck {
+    color: var(--wv-accent);
+    font-size: 13px;
+}
+
+.wv-srcsoon {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--wv-on-var);
+    border: 1px solid var(--wv-ov);
+    border-radius: 6px;
+    padding: 1px 5px;
+}
+
+/* Saucepan paste-token sheet (DESIGN.md Q14): reuse the mode-sheet chrome. */
+.wv-tokensheet {
+    gap: 10px;
+}
+
+.wv-tokenhint {
+    font-size: 12px;
+    color: var(--wv-on-var);
+    line-height: 1.45;
+    max-width: 360px;
+}
+
+.wv-tokeninput {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--wv-ov);
+    border-radius: 10px;
+    color: var(--wv-on);
+    font-size: 13px;
+    padding: 9px 12px;
+    outline: none;
+}
+
+.wv-tokeninput:focus {
+    border-color: var(--wv-accent);
+}
+
+.wv-tokenrow {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.wv-tokenrow button {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 10px;
+    color: var(--wv-on);
+}
+
+.wv-tokenrow button:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.wv-tokenrow .wv-tokensave {
+    background: var(--wv-accent);
+    color: #fff;
+}
+
 /* Sort chip: labelled GlassSurface — auto width, 10px horizontal padding
    (list_controls.dart), vs the bare-icon filter button's 32px circle. */
 .wv-panel .wv-iconbtn.wv-sortbtn {
@@ -1730,4 +1846,15 @@
         transition: none !important;
         animation: none !important;
     }
+}
+
+/* Providers popup is appended to #wv-root (outside .wv-panel), so it misses
+   the .wv-panel button chrome reset — replicate it here, after .wv-menu's
+   row rules so this file order wins the specificity ties. */
+.wv-srcmenu button {
+    font: inherit;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    color: inherit;
 }

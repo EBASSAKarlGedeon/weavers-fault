@@ -17,6 +17,24 @@ import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldIn
 // Resolved against this module URL so the popup markup works wherever the
 // extension is served from (the overlay DOM lives under the app's base URL).
 const IMG_CHUB = new URL('chub.png', import.meta.url).href;
+const IMG_JANITOR = new URL('janitor.png', import.meta.url).href;
+const IMG_DATACAT = new URL('datacat.png', import.meta.url).href;
+
+// Provider switch (Glaze Providers popup): Datacat ships in M5 — the row is
+// shown but disabled, exactly like an unbuilt milestone should be.
+const SOURCE_META = {
+    chub: { label: 'Chub', img: IMG_CHUB },
+    saucepan: { label: 'JanitorAI', img: IMG_JANITOR },
+    datacat: { label: 'Datacat', img: IMG_DATACAT },
+};
+
+// Extracted Saucepan cards by companionId — the detail FAB import consumes these.
+const saucepanFiles = new Map();
+
+function parseCompanionIdLocal(url) {
+    const m = /saucepan\.ai\/companion\/([a-f0-9-]{8,64})/i.exec(String(url));
+    return m ? m[1] : null;
+}
 
 const extensionName = "Weaver's Vault";
 const MODULE = 'weavers-vault';
@@ -25,6 +43,7 @@ const DEFAULTS = {
     nsfw: false,          // committed content filter (applies when the sheet closes)
     sort: 'popular',
     query: '',
+    source: 'chub',       // active catalog source (Q8): chub | saucepan (JanitorAI)
     perPage: 24,
     openAfterImport: true,
     filters: {},          // per-source filter profiles (keyed by source id)
@@ -242,6 +261,7 @@ function openVault() {
     ensureOverlay();
     root.hidden = false;
     const s = settings();
+    state.source = s.source ?? 'chub';
     const f = committedFilters();
     state.query = s.query;
     state.sort = s.sort;
@@ -251,7 +271,22 @@ function openVault() {
     hydrateControls();
     if (!state.hydrated) {
         state.hydrated = true;
-        runSearch();
+        if (state.source === 'chub') runSearch();
+        else showSourceHint();
+    }
+}
+
+// Non-browsable sources (Saucepan URL import): the grid stays empty until a
+// companion URL is pasted — the hint names the flow, Glaze empty-state style.
+function showSourceHint() {
+    const grid = root.querySelector('.wv-grid');
+    if (grid) grid.innerHTML = '';
+    const meta = SOURCE_META[state.source] ?? SOURCE_META.chub;
+    const status = root.querySelector('.wv-status');
+    if (status && !status.textContent) {
+        status.textContent = state.source === 'saucepan'
+            ? 'Paste a saucepan.ai companion URL above to import'
+            : `${meta.label}: coming in a later milestone`;
     }
 }
 
@@ -269,6 +304,7 @@ const state = {
     epoch: 0,
     query: '',
     sort: 'popular',
+    source: 'chub',      // active catalog source (mirrors settings().source)
     filters: null,       // committed filter model (Glaze CatalogFilters mirror)
     tagCloud: null,      // full tag index for the filter sheet (loaded lazily)
     tagCloudLoading: false,
@@ -369,7 +405,9 @@ function runSearch() {
 }
 
 function loadMore() {
-    if (state.loading || state.reachedEnd) return;
+    // Chub is the only browsable (infinite-scroll) source; clearing the grid
+    // for a non-browsable source must not drag the sentinel into a search.
+    if (state.source !== 'chub' || state.loading || state.reachedEnd) return;
     state.page += 1;
     runSearch();
 }
@@ -534,8 +572,29 @@ function wireToolbar() {
         state.query = search.value;
         settings().query = search.value;
         saveSettingsQuiet();
+        // Saucepan source: the search bar is a paste-URL importer, not browse.
+        if (state.source === 'saucepan') {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                if (parseCompanionIdLocal(state.query)) importSaucepanUrl(state.query.trim());
+            }, 600);
+            return;
+        }
         clearTimeout(searchTimer);
         searchTimer = setTimeout(resetAndSearch, 400); // Glaze's debounce cadence
+    });
+    search.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && state.source === 'saucepan' && parseCompanionIdLocal(search.value)) {
+            e.preventDefault();
+            clearTimeout(searchTimer);
+            importSaucepanUrl(search.value.trim());
+        }
+    });
+
+    // Source chip → Providers popup (Glaze provider switch: rows + active check).
+    root.querySelector('.wv-source').addEventListener('click', e => {
+        e.stopPropagation();
+        showSourceMenu();
     });
 
     // Sort menu (glass chip → desktop popup, Glaze sortIconChip)
@@ -885,7 +944,7 @@ let detailAbort = null;
 // floating window, EMPTY title, close button, no dim): hero 310 + floating
 // header buttons + pill tab strip + Info/Prompt Blocks/Images panes + the
 // accent Import FAB bottom-right (character_detail_screen.dart).
-async function openDetail(item) {
+async function openDetail(item, preloaded = null) {
     ensureOverlay();
     const popup = root.querySelector('.wv-detail');
     popup.hidden = false;
@@ -903,6 +962,11 @@ async function openDetail(item) {
     popup.querySelector('.wv-dclose').addEventListener('click', () => { popup.hidden = true; });
     detailAbort?.abort();
     detailAbort = new AbortController();
+    // Saucepan items arrive with the character already extracted — no fetch.
+    if (preloaded) {
+        renderDetail(popup, item, preloaded);
+        return;
+    }
     try {
         const r = await fetch(`/api/weavers-vault/chub/character?fullPath=${encodeURIComponent(item.fullPath)}`,
             { headers: getRequestHeaders(), signal: detailAbort.signal });
@@ -972,7 +1036,9 @@ function renderDetail(popup, item, character) {
                     </div>
                     <div class="wv-herocap">
                         <div class="wv-heroname">${escapeHtml(name)}</div>
-                        <a class="wv-heroauthor" href="https://chub.ai/${escapeHtml((item.fullPath || '').split('/')[0])}" target="_blank" rel="noopener noreferrer">@${escapeHtml(d.creator || '')}</a>
+                        ${d.creator
+                            ? `<a class="wv-heroauthor" href="${item.source === 'saucepan' ? 'https://saucepan.ai/companion/' + encodeURIComponent(item.fullPath ?? '') : 'https://chub.ai/' + escapeHtml((item.fullPath || '').split('/')[0])}" target="_blank" rel="noopener noreferrer">@${escapeHtml(d.creator)}</a>`
+                            : (item.source === 'saucepan' ? '' : `<span class="wv-heroauthor">@${escapeHtml((item.fullPath || '').split('/')[0])}</span>`)}
                     </div>
                 </div>
                 <div class="wv-dtabs" data-active="0">
@@ -1087,6 +1153,8 @@ function renderDetail(popup, item, character) {
         pop.querySelectorAll('.wv-dpoprow').forEach(b => b.addEventListener('click', () => {
             if (b.dataset.act === 'unblur') {
                 heroImg?.classList.remove('wv-blurred');
+            } else if (item.source === 'saucepan') {
+                window.open(`https://saucepan.ai/companion/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             } else {
                 window.open(`https://chub.ai/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             }
@@ -1099,6 +1167,7 @@ function renderDetail(popup, item, character) {
 
     // Import FAB → mode sheet when lorebooks exist, straight import otherwise.
     popup.querySelector('.wv-dfab').addEventListener('click', () => {
+        if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
         if (book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
@@ -1143,13 +1212,189 @@ function showImportModeSheet(item, character) {
 
 function ledgerCheck(item) {
     const s = settings();
-    return s.ledger.find(e => e.source === 'chub' && e.id === item.fullPath);
+    const source = item.source ?? 'chub';
+    return s.ledger.find(e => e.source === source && e.id === item.fullPath);
 }
 
 function ledgerAdd(item, what) {
     const s = settings();
-    s.ledger.push({ source: 'chub', id: item.fullPath, name: item.name, what, at: Date.now(), url: `https://chub.ai/characters/${item.fullPath}` });
+    const source = item.source ?? 'chub';
+    s.ledger.push({
+        source,
+        id: item.fullPath,
+        name: item.name,
+        what,
+        at: Date.now(),
+        url: source === 'saucepan'
+            ? `https://saucepan.ai/companion/${item.fullPath}`
+            : `https://chub.ai/characters/${item.fullPath}`,
+    });
     saveSettingsQuiet();
+}
+
+// ─── Provider switch (M4) ────────────────────────────────────────────────────
+
+function showSourceMenu() {
+    const old = root.querySelector('.wv-srcmenu');
+    if (old) { old.remove(); return; }
+    const pop = document.createElement('div');
+    pop.className = 'wv-menu wv-srcmenu';
+    pop.innerHTML = `
+        <div class="wv-srchead">Providers</div>
+        ${Object.entries(SOURCE_META).map(([id, meta]) => `
+            <button class="wv-srcrow ${id === state.source ? 'wv-on' : ''} ${id === 'datacat' ? 'wv-srcdisabled' : ''}" data-source="${id}" ${id === 'datacat' ? 'disabled' : ''}>
+                <img src="${meta.img}" width="18" height="18" alt="" />
+                <span class="wv-srclabel">${meta.label}</span>
+                ${id === 'datacat' ? '<span class="wv-srcsoon">M5</span>' : ''}
+            </button>`).join('')}`;
+    root.appendChild(pop);
+    const chip = root.querySelector('.wv-source').getBoundingClientRect();
+    pop.style.left = `${Math.round(chip.left)}px`;
+    pop.style.top = `${Math.round(chip.bottom + 6)}px`;
+    pop.querySelectorAll('.wv-srcrow:not(.wv-srcdisabled)').forEach(b => b.addEventListener('click', () => {
+        pop.remove();
+        setSource(b.dataset.source);
+    }));
+    setTimeout(() => document.addEventListener('click', function once(ev) {
+        if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener('click', once); }
+    }), 0);
+}
+
+function setSource(source) {
+    if (!SOURCE_META[source] || source === 'datacat') return;
+    state.source = source;
+    settings().source = source;
+    saveSettingsQuiet();
+    const chip = root.querySelector('.wv-source');
+    const meta = SOURCE_META[source];
+    chip.querySelector('img').src = meta.img;
+    chip.querySelector('.wv-srclabel').textContent = meta.label;
+    const search = root.querySelector('.wv-search');
+    search.placeholder = source === 'saucepan' ? 'Paste a saucepan.ai companion URL…' : 'Search characters...';
+    if (source === 'chub') {
+        resetAndSearch();
+    } else {
+        // Non-browsable source: clear the grid and point at the paste flow.
+        state.items = [];
+        const grid = root.querySelector('.wv-grid');
+        if (grid) grid.innerHTML = '';
+        const status = root.querySelector('.wv-status');
+        status.classList.remove('wv-status-error');
+        status.textContent = 'Paste a saucepan.ai companion URL above to import';
+    }
+}
+
+// ─── Saucepan URL import (M4) ────────────────────────────────────────────────
+// The server does the extraction (auth-gated REST + decoy-fragment
+// reassembly) and returns a ready card PNG; the import then rides the exact
+// same native chain as the chub flow.
+
+async function importSaucepanUrl(url) {
+    const status = root.querySelector('.wv-status');
+    status.classList.remove('wv-status-error');
+    status.textContent = 'Extracting companion…';
+    try {
+        const r = await fetch('/api/weavers-vault/saucepan/extract', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ url }),
+        });
+        const body = await r.json().catch(() => null);
+        if (r.status === 401) {
+            status.textContent = '';
+            openSaucepanTokenSheet(url);
+            return;
+        }
+        if (!r.ok) throw new Error(body?.error || `Saucepan answered ${r.status}`);
+        const character = body.character;
+        const item = {
+            id: body.companionId,
+            fullPath: body.companionId,
+            name: character.data.name,
+            avatarUrl: body.avatarDataUrl,
+            tags: character.data.tags ?? [],
+            nsfw: false,
+            source: 'saucepan',
+        };
+        saucepanFiles.set(body.companionId, body.file);
+        status.textContent = '';
+        openDetail(item, character);
+    } catch (error) {
+        status.classList.add('wv-status-error');
+        status.textContent = error.message;
+    }
+}
+
+// Paste-only bearer token (DESIGN.md Q14) — a small sheet, not a login form.
+function openSaucepanTokenSheet(retryUrl) {
+    const overlay = document.createElement('div');
+    overlay.className = 'wv-mode-overlay';
+    overlay.innerHTML = `
+        <div class="wv-modesheet wv-tokensheet">
+            <div class="wv-modehandle"></div>
+            <div class="wv-modehead">Saucepan token</div>
+            <div class="wv-tokenhint">Paste your saucepan.ai bearer token. It is stored per-device in Loreweaver's secrets and never synced.</div>
+            <input class="wv-tokeninput" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false" />
+            <div class="wv-tokenrow">
+                <button class="wv-tokencancel">Not now</button>
+                <button class="wv-tokensave">Save</button>
+            </div>
+        </div>`;
+    root.appendChild(overlay);
+    const input = overlay.querySelector('.wv-tokeninput');
+    input.focus();
+    overlay.querySelector('.wv-tokencancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('.wv-tokensave').addEventListener('click', async () => {
+        const token = input.value.trim();
+        if (!token) return;
+        try {
+            const r = await fetch('/api/weavers-vault/saucepan/token', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ token }),
+            });
+            if (!r.ok) throw new Error(`Token save failed (${r.status})`);
+            overlay.remove();
+            toastr.success('Saucepan token saved', "Weaver's Vault");
+            if (retryUrl) importSaucepanUrl(retryUrl);
+        } catch (error) {
+            toastr.error(error.message, "Weaver's Vault");
+        }
+    });
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') overlay.querySelector('.wv-tokensave').click();
+    });
+}
+
+async function importSaucepanCharacter(item, character) {
+    const cardFile = saucepanFiles.get(item.fullPath);
+    if (!cardFile) {
+        toastr.error('Extraction data missing — paste the companion URL again.', "Weaver's Vault");
+        return;
+    }
+    const dup = ledgerCheck(item);
+    if (dup) {
+        toastr.warning(`Imported before (${new Date(dup.at).toLocaleString()}) — importing again creates a duplicate.`, "Weaver's Vault");
+    }
+    toastr.info('Importing character…', "Weaver's Vault");
+    try {
+        // The card PNG the server built already carries the vault provenance
+        // (vault_source/vault_url/vault_full_path) inside its chara chunk.
+        const bytes = Uint8Array.from(atob(cardFile.buffer), c => c.charCodeAt(0));
+        const file = new File([bytes], cardFile.fileName, { type: cardFile.fileType });
+        const importedAvatar = await importCharacter(file, { importTags: false });
+        await getCharacters();
+        const target = importedAvatar ? characters.find(c => c.avatar === importedAvatar) : null;
+        if (!target) {
+            console.warn(`[${extensionName}] imported but could not locate character in the library list`);
+        }
+        ledgerAdd(item, 'character');
+        toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
+    } catch (error) {
+        console.error(`[${extensionName}] import failed`, error);
+        toastr.error(error.message, "Weaver's Vault import failed");
+    }
 }
 
 // Fetches a source file through Loreweaver's content pipeline (UA spoofing +

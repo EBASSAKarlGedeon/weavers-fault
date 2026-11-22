@@ -1177,10 +1177,15 @@ async function importChubCharacter(item, character, withBook) {
         // Native chain minus the tag-import popup: content pipeline → importCharacter
         // (importTags:false → no dialog; the card's tags still ride the card data).
         const { file } = await vaultFetchSourceFile(`https://chub.ai/characters/${item.fullPath}`);
-        await importCharacter(file, { importTags: false });
+        // importCharacter returns the avatar filename the import actually created —
+        // match by that, NOT by name: chub detail names often carry a leading space
+        // (" Mother Silk") while the import pipeline sanitizes it away, so name
+        // equality silently fails and the provenance stamp never lands.
+        const importedAvatar = await importCharacter(file, { importTags: false });
         await getCharacters();
-        // Match by name; the import pipeline's JSON may differ subtly from the detail fetch.
-        const target = characters.filter(c => c.name === character.data.name).pop();
+        const target = importedAvatar
+            ? characters.find(c => c.avatar === importedAvatar)
+            : characters.filter(c => (c.name ?? '').trim() === (character.data.name ?? '').trim()).pop();
         if (!target) {
             console.warn(`[${extensionName}] imported but could not locate character for provenance stamp`);
         } else {
@@ -1197,7 +1202,7 @@ async function importChubCharacter(item, character, withBook) {
                 toastr.success(`Lorebook '${bookName}' imported and linked.`, "Weaver's Vault");
             }
             // Stamp provenance via the standard character edit endpoint.
-            await fetch('/api/characters/edit', {
+            const editResponse = await fetch('/api/characters/edit', {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({
@@ -1206,6 +1211,10 @@ async function importChubCharacter(item, character, withBook) {
                     json_data: JSON.stringify(target),
                 }),
             });
+            if (!editResponse.ok) {
+                console.error(`[${extensionName}] provenance stamp edit failed (${editResponse.status}) — card imported but not stamped`);
+                toastr.warning('Imported, but provenance stamping failed — cleanup tests may refuse to remove this card.', "Weaver's Vault");
+            }
             await getCharacters();
         }
         ledgerAdd(item, 'character' + (withBook ? '+lorebook' : ''));

@@ -391,11 +391,6 @@
     background: rgba(255, 255, 255, 0.08);
 }
 
-.wv-tokenrow .wv-tokensave {
-    background: var(--wv-accent);
-    color: #fff;
-}
-
 /* Sort chip: labelled GlassSurface — auto width, 10px horizontal padding
    (list_controls.dart), vs the bare-icon filter button's 32px circle. */
 .wv-panel .wv-iconbtn.wv-sortbtn {

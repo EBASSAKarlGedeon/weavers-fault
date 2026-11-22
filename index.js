@@ -1652,33 +1652,39 @@ async function importDatacatBridgeCard(payload) {
             datacatCharacterId: id, phase: 'Importing PNG', step: 'st-import-png', stepLabel: 'Import PNG',
         });
         const fileName = await importCharacter(file, { importTags: false });
+        if (!fileName) throw new Error('Loreweaver could not import this card.');
+        await getCharacters();
 
         postDatacatAck(requestId, 'processing', 'Refreshing library…', {
             datacatCharacterId: id, avatar: fileName, phase: 'Refreshing library', step: 'refresh-library', stepLabel: 'Refresh library',
         });
-        await getCharacters();
 
         datacatBridge.imported.set(id, fileName);
-        // Provenance for the ledger + the source link, stamped the same way the
-        // other providers' imports are.
-        try {
-            await fetch('/api/characters/edit', {
+        // Provenance for the ledger + the source link. Same shape the other
+        // providers use: edit the live character object, then PUT the whole card
+        // back — the endpoint rejects a partial payload ("invalid name").
+        const target = characters.find(c => c.avatar === fileName);
+        if (!target) {
+            console.warn("[Weaver's Vault] DataCat import landed but could not be found for stamping");
+        } else {
+            target.data.extensions = target.data.extensions ?? {};
+            target.data.extensions.vault_source = 'datacat';
+            target.data.extensions.vault_full_path = id;
+            target.data.extensions.vault_url = `https://datacat.run/characters/${id}`;
+            const editResponse = await fetch('/api/characters/edit', {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({
-                    avatar_url: fileName,
-                    json_data: JSON.stringify({
-                        extensions: {
-                            vault_source: 'datacat',
-                            vault_full_path: id,
-                            vault_url: `https://datacat.run/characters/${id}`,
-                        },
-                    }),
+                    ch_name: target.name,
+                    avatar_url: target.avatar,
+                    json_data: JSON.stringify(target),
                 }),
             });
-        } catch (error) {
-            toastr.warning('Imported, but provenance stamping failed.', "Weaver's Vault");
-            console.warn("[Weaver's Vault] DataCat provenance stamp failed:", error.message);
+            if (!editResponse.ok) {
+                console.error("[Weaver's Vault] DataCat provenance stamp failed:", editResponse.status);
+                toastr.warning('Imported, but provenance stamping failed.', "Weaver's Vault");
+            }
+            await getCharacters();
         }
 
         postDatacatAck(requestId, 'ok', 'Imported into Loreweaver.', {

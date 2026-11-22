@@ -286,45 +286,52 @@
     padding: 1px 5px;
 }
 
-/* Saucepan paste-token sheet (DESIGN.md Q14): reuse the mode-sheet chrome. */
+/* Saucepan login sheet — Glaze recipes: fields = Material InputDecorationTheme
+   (fill surfaceContainerHighest #1E1E1E, outline border, radius 12), buttons
+   = GlazeActionButton (primary = accent@18% tint + accent@22% border,
+   neutral = surface fill + onSurface@22% border, radius 14, 13px w600). */
 .wv-tokensheet {
-    gap: 10px;
+    gap: 14px;
+    padding-top: 20px;
+    width: min(92vw, 480px);
+}
+
+.wv-tokensheet .wv-modehead {
+    padding: 0 24px 0;
 }
 
 .wv-tokenhint {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--wv-on-var);
-    line-height: 1.45;
-    max-width: 360px;
+    line-height: 1.5;
+    padding: 0 24px;
 }
 
 .wv-tokeninput {
     width: 100%;
     box-sizing: border-box;
-    background: rgba(255, 255, 255, 0.05);
+    background: #1E1E1E;
     border: 1px solid var(--wv-ov);
-    border-radius: 10px;
+    border-radius: 12px;
     color: var(--wv-on);
-    font-size: 13px;
-    padding: 9px 12px;
+    font-size: 14px;
+    padding: 13px 16px;
     outline: none;
+}
+
+.wv-tokeninput::placeholder {
+    color: var(--wv-on-var);
 }
 
 .wv-tokeninput:focus {
     border-color: var(--wv-accent);
 }
 
-.wv-tokenrow {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 8px;
-}
-
 .wv-loginfields {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    padding: 0 24px;
 }
 
 /* display:flex would override the hidden attribute's UA display:none */
@@ -332,15 +339,49 @@
     display: none;
 }
 
-.wv-tokenrow button {
+.wv-tokensheet .wv-tokeninput.wv-logintoken {
+    margin: 0 24px;
+}
+
+.wv-abtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 14px;
     font-size: 13px;
     font-weight: 600;
-    padding: 8px 14px;
-    border-radius: 10px;
+    cursor: pointer;
+}
+
+.wv-abtn .wv-abtnicon {
+    font-size: 16px;
+}
+
+.wv-abtn.wv-abtn-expand {
+    width: auto;
+    align-self: stretch;
+    margin: 0 24px;
+}
+
+.wv-abtn.wv-abtn-primary {
+    background: rgba(196, 42, 74, 0.18);
+    border: 1px solid rgba(196, 42, 74, 0.22);
+    color: var(--wv-accent);
+}
+
+.wv-abtn.wv-abtn-primary:hover {
+    background: rgba(196, 42, 74, 0.28);
+}
+
+.wv-abtn.wv-abtn-neutral {
+    background: var(--wv-ui);
+    border: 1px solid rgba(225, 227, 230, 0.22);
     color: var(--wv-on);
 }
 
-.wv-tokenrow button:hover {
+.wv-abtn.wv-abtn-neutral:hover {
     background: rgba(255, 255, 255, 0.08);
 }
 
@@ -408,7 +449,7 @@
     display: flex;
     gap: 8px;
     height: 28px;
-    padding: 0 16px 12px;
+    padding: 0 16px 18px;
     overflow-x: auto;
     scrollbar-width: none;
     flex-shrink: 0;

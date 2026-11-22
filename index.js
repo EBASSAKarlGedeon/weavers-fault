@@ -17,14 +17,14 @@ import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldIn
 // Resolved against this module URL so the popup markup works wherever the
 // extension is served from (the overlay DOM lives under the app's base URL).
 const IMG_CHUB = new URL('chub.png', import.meta.url).href;
-const IMG_JANITOR = new URL('janitor.png', import.meta.url).href;
+const IMG_SAUCEPAN = new URL('saucepan.svg', import.meta.url).href;
 const IMG_DATACAT = new URL('datacat.png', import.meta.url).href;
 
 // Provider switch (Glaze Providers popup): Datacat ships in M5 — the row is
 // shown but disabled, exactly like an unbuilt milestone should be.
 const SOURCE_META = {
     chub: { label: 'Chub', img: IMG_CHUB },
-    saucepan: { label: 'JanitorAI', img: IMG_JANITOR },
+    saucepan: { label: 'Saucepan', img: IMG_SAUCEPAN },
     datacat: { label: 'Datacat', img: IMG_DATACAT },
 };
 
@@ -43,7 +43,7 @@ const DEFAULTS = {
     nsfw: false,          // committed content filter (applies when the sheet closes)
     sort: 'popular',
     query: '',
-    source: 'chub',       // active catalog source (Q8): chub | saucepan (JanitorAI)
+    source: 'chub',       // active catalog source (Q8): chub | saucepan | datacat
     perPage: 24,
     openAfterImport: true,
     filters: {},          // per-source filter profiles (keyed by source id)
@@ -1328,7 +1328,10 @@ async function importSaucepanUrl(url) {
 // Paste-only bearer token (DESIGN.md Q14) — a small sheet, not a login form.
 // Saucepan login sheet (saucepan_login_sheet.dart): handle + password is the
 // primary path (mints the bearer token server-side, password never stored);
-// paste-token is the fallback toggle, exactly like Glaze's form.
+// paste-token is the fallback toggle. Buttons are GlazeActionButtons: full-
+// width tiles — primary = accent@18% tint / accent@22% border, neutral =
+// surface fill / onSurface@22% border, radius 14, icon 16px + 8px gap, 13px
+// w600 label. Outside tap (or Esc) dismisses, like a Glaze bottom sheet.
 function openSaucepanTokenSheet(retryUrl) {
     const overlay = document.createElement('div');
     overlay.className = 'wv-mode-overlay';
@@ -1336,48 +1339,54 @@ function openSaucepanTokenSheet(retryUrl) {
         <div class="wv-modesheet wv-tokensheet">
             <div class="wv-modehandle"></div>
             <div class="wv-modehead">Log in to Saucepan</div>
-            <div class="wv-tokenhint">Extraction pulls the companion definition under your account and reassembles it. Credentials go only to saucepan.ai; the minted token is stored per-device in Loreweaver's secrets and never synced.</div>
+            <div class="wv-tokenhint">Extraction pulls the companion definition under your account and reassembles it on-device. A throwaway account is recommended. Credentials go only to saucepan.ai — the minted token is stored per-device and never synced.</div>
             <div class="wv-loginfields">
                 <input class="wv-tokeninput wv-loginhandle" type="text" placeholder="Handle" autocomplete="off" spellcheck="false" />
                 <input class="wv-tokeninput wv-loginpass" type="password" placeholder="Password" autocomplete="off" spellcheck="false" />
             </div>
             <input class="wv-tokeninput wv-logintoken" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false" hidden />
-            <div class="wv-tokenrow">
-                <button class="wv-tokencancel">Not now</button>
-                <button class="wv-tokenswap wv-tokenswapmode" title="Use a bearer token instead">Use a bearer token instead</button>
-                <button class="wv-tokensave">Log in</button>
-            </div>
+            <button class="wv-abtn wv-abtn-primary wv-abtn-expand" type="button">
+                <span class="fa-solid fa-right-to-bracket wv-abtnicon"></span><span class="wv-abtnlabel">Log in</span>
+            </button>
+            <button class="wv-abtn wv-abtn-neutral wv-abtn-expand" type="button">
+                <span class="fa-solid fa-key wv-abtnicon"></span><span class="wv-abtnlabel">Use a bearer token instead</span>
+            </button>
         </div>`;
     root.appendChild(overlay);
     const handle = overlay.querySelector('.wv-loginhandle');
     const pass = overlay.querySelector('.wv-loginpass');
     const token = overlay.querySelector('.wv-logintoken');
-    const swap = overlay.querySelector('.wv-tokenswap');
-    const save = overlay.querySelector('.wv-tokensave');
+    const fields = overlay.querySelector('.wv-loginfields');
+    const primary = overlay.querySelector('.wv-abtn-primary');
+    const swap = overlay.querySelector('.wv-abtn-neutral');
     handle.focus();
-    overlay.querySelector('.wv-tokencancel').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
     swap.addEventListener('click', () => {
         const toToken = token.hidden;
         token.hidden = !toToken;
-        overlay.querySelector('.wv-loginfields').hidden = toToken;
-        swap.textContent = toToken ? 'Log in with handle instead' : 'Use a bearer token instead';
-        save.textContent = toToken ? 'Save' : 'Log in';
+        fields.hidden = toToken;
+        swap.querySelector('.wv-abtnlabel').textContent = toToken ? 'Log in with handle instead' : 'Use a bearer token instead';
+        swap.querySelector('.wv-abtnicon').className = toToken
+            ? 'fa-solid fa-right-to-bracket wv-abtnicon'
+            : 'fa-solid fa-key wv-abtnicon';
+        primary.querySelector('.wv-abtnlabel').textContent = toToken ? 'Save token' : 'Log in';
         (toToken ? token : handle).focus();
     });
     const submit = async () => {
         const useToken = !token.hidden;
+        const label = primary.querySelector('.wv-abtnlabel');
         try {
+            label.textContent = 'Signing in…';
             let r;
             if (useToken) {
-                if (!token.value.trim()) return;
+                if (!token.value.trim()) { label.textContent = 'Save token'; return; }
                 r = await fetch('/api/weavers-vault/saucepan/token', {
                     method: 'POST',
                     headers: getRequestHeaders(),
                     body: JSON.stringify({ token: token.value.trim() }),
                 });
             } else {
-                if (!handle.value.trim() || !pass.value) return;
+                if (!handle.value.trim() || !pass.value) { label.textContent = 'Log in'; return; }
                 r = await fetch('/api/weavers-vault/saucepan/login', {
                     method: 'POST',
                     headers: getRequestHeaders(),
@@ -1390,9 +1399,10 @@ function openSaucepanTokenSheet(retryUrl) {
             if (retryUrl) importSaucepanUrl(retryUrl);
         } catch (error) {
             toastr.error(error.message, "Weaver's Vault");
+            label.textContent = useToken ? 'Save token' : 'Log in';
         }
     };
-    save.addEventListener('click', submit);
+    primary.addEventListener('click', submit);
     overlay.addEventListener('keydown', e => {
         if (e.key === 'Enter') submit();
     });
@@ -1520,46 +1530,28 @@ async function importChubLorebookOnly(item, character) {
 // Wiring
 // ---------------------------------------------------------------------------
 
-function addMenuEntry() {
-    const menu = document.getElementById('extensionsMenu');
-    if (!menu || document.getElementById('wv-menu-entry')) return !!menu;
-    const item = document.createElement('div');
-    item.id = 'wv-menu-entry';
-    item.className = 'list-group-item flex-container flexGap5 interactable';
-    item.tabIndex = 0;
-    item.title = "Open Weaver's Vault";
-    const icon = document.createElement('div');
-    icon.className = 'fa-solid fa-book extensionsMenuExtensionButton';
-    const label = document.createElement('span');
-    label.textContent = "Weaver's Vault";
-    item.append(icon, label);
-    item.addEventListener('click', openVault);
-    item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') openVault(); });
-    menu.appendChild(item);
-    return true;
-}
-
 function addLauncher() {
-    if (document.getElementById('wv-launcher')) return;
-    const b = document.createElement('button');
-    b.id = 'wv-launcher';
-    b.type = 'button';
-    b.title = "Open Weaver's Vault";
-    b.setAttribute('aria-label', "Open Weaver's Vault");
-    b.textContent = '📚';
+    if (document.getElementById('wv-topbar-button')) return true;
+    // Top bar, right after the Character Management icon (#rightNavHolder).
+    const anchor = document.getElementById('rightNavHolder');
+    if (!anchor) return false;
+    const b = document.createElement('div');
+    b.id = 'wv-topbar-button';
+    b.className = 'drawer';
+    b.innerHTML = '<div class="drawer-toggle"><div class="drawer-icon fa-solid fa-book fa-fw closedIcon" title="Open Weaver\'s Vault"></div></div>';
     b.addEventListener('click', openVault);
-    document.body.appendChild(b);
+    anchor.insertAdjacentElement('afterend', b);
+    return true;
 }
 
 jQuery(async () => {
     console.log(`[${extensionName}] Loading…`);
     try {
         settings();
-        if (!addMenuEntry()) {
-            // Menu not ready yet; retry shortly (same as RPG engine's approach).
-            setTimeout(addMenuEntry, 2000);
+        if (!addLauncher()) {
+            // Top bar not ready yet; retry shortly (same as RPG engine's approach).
+            setTimeout(addLauncher, 2000);
         }
-        addLauncher();
         ensureOverlay();
         wireToolbar();
         console.log(`[${extensionName}] ✅ Loaded successfully`);

@@ -268,6 +268,7 @@ function openVault() {
     state.filters = { ...f, tags: new Set(f.tagNames) };
     state.nsfw = f.nsfw;
     root.querySelector('.wv-search').value = s.query;
+    hydrateSourceChip();
     hydrateControls();
     if (!state.hydrated) {
         state.hydrated = true;
@@ -1260,17 +1261,23 @@ function showSourceMenu() {
     }), 0);
 }
 
+// Chip/placeholder must match the persisted source on every open — setSource
+// isn't called for restores (would clear the grid/reset search).
+function hydrateSourceChip() {
+    const meta = SOURCE_META[state.source] ?? SOURCE_META.chub;
+    const chip = root.querySelector('.wv-source');
+    chip.querySelector('img').src = meta.img;
+    chip.querySelector('.wv-srclabel').textContent = meta.label;
+    const search = root.querySelector('.wv-search');
+    search.placeholder = state.source === 'saucepan' ? 'Paste a saucepan.ai companion URL…' : 'Search characters...';
+}
+
 function setSource(source) {
     if (!SOURCE_META[source] || source === 'datacat') return;
     state.source = source;
     settings().source = source;
     saveSettingsQuiet();
-    const chip = root.querySelector('.wv-source');
-    const meta = SOURCE_META[source];
-    chip.querySelector('img').src = meta.img;
-    chip.querySelector('.wv-srclabel').textContent = meta.label;
-    const search = root.querySelector('.wv-search');
-    search.placeholder = source === 'saucepan' ? 'Paste a saucepan.ai companion URL…' : 'Search characters...';
+    hydrateSourceChip();
     if (source === 'chub') {
         resetAndSearch();
     } else {

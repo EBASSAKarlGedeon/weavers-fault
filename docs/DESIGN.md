@@ -76,20 +76,28 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    source-aware detail/FAB/ledger. Live-verified: routes + providers menu + token-sheet flow.
    A real end-to-end extraction needs the user's saucepan.ai bearer token (upstream answered
    401 Invalid token to a fake one — request format confirmed).
-5. **M5 — DataCat** (COMPLETE 2026-11-22): official `api/client/v1` adapter. Pure port in
-   `src/endpoints/weavers-vault-datacat.js` (installation-id contract, device-flow bodies,
-   header set, /characters + two-window /fresh query shaping, sort/window resolution incl.
-   legacy keys, summary normalization, V2 reader with provenance, client-side filter
-   application, lease store, error classification) — 40 jest tests. Routes in
-   `weavers-vault-datacat-routes.js`: client id (settings field), status, search, tags,
-   character, hosted verification (start/poll), protected card+avatar transfer under a
-   process-wide lease, account link (start/poll/unlink). Extension: DataCat is a browsable
-   provider with its own sort vocabulary, verification sheet and import.
-   Glaze ships with NO client id (`--dart-define`, default empty), so the id is a
-   per-device setting here; until one is entered the source surfaces DataCat's own
-   403 ("integration is not approved or has been revoked"), which is the honest answer.
-   The iframe-bridge fallback is NOT built: the client-id path is the contract, and
-   without a key neither path can do anything.
+5. **M5 — DataCat** (COMPLETE 2026-11-22): **embedded-browser bridge**, not the client-API
+   path. DataCat's own SillyTavern browser extension (v0.1.9, AGPL-3.0) does not call a
+   REST endpoint at all: it loads `datacat.run` in an iframe (`dc_embed=st`,
+   `dc_auth_mode=client-link`, nonce-bound) and receives a finished PNG card over
+   `postMessage`. That is the only route that works with **no account and no client id** —
+   verified live (handshake `ready` from datacat.run; the site's own Discover grid, filters
+   and age gate render inside the vault panel).
+   Ported parent side: `init`/`ready`, `prepare` → `need-card`, `card` → import →
+   `processing`/`ok` acks (which the site renders as *Check local copy → Import PNG →
+   Refresh library*), UUID character-id validation, request-id validation, PNG signature +
+   32 MB cap, duplicate-import guard, completed-ack replay, `vault_source=datacat`
+   provenance. The frame is created once and hidden rather than detached: detaching an
+   iframe destroys its browsing context (the official extension parks its frame for the
+   same reason). While browsing, the panel hides the grid's furniture; this also exposed
+   that row rules outrank the UA `[hidden]` rule, now root-fixed with
+   `#wv-root [hidden] { display: none !important }`.
+   Kept as an optional path: `src/endpoints/weavers-vault-datacat.js` +
+   `weavers-vault-datacat-routes.js` port Glaze's `api/client/v1` adapter (40 jest tests:
+   installation-id body contract, device-flow bodies, two-window `/fresh` query shaping,
+   sort/window resolution, lease store, error classification). Glaze ships with **no**
+   client id (`--dart-define`, default empty) and DataCat must approve an integration id,
+   so this path cannot be exercised here; nothing in the UI depends on it.
 6. **M6 — extras**: batch queue, favorites, JannyAI-search decision (1-day timebox), polish.
 7. **v2 (separate effort)**: JanitorAI + Janny-detail via Electron webview.
 

@@ -881,11 +881,26 @@ function renderTagPicker() {
 
 let detailAbort = null;
 
+// Character detail as Glaze's desktop window (glaze_sheet.dart: chrome'd
+// floating window, EMPTY title, close button, no dim): hero 310 + floating
+// header buttons + pill tab strip + Info/Prompt Blocks/Images panes + the
+// accent Import FAB bottom-right (character_detail_screen.dart).
 async function openDetail(item) {
     ensureOverlay();
     const popup = root.querySelector('.wv-detail');
     popup.hidden = false;
-    popup.innerHTML = '<div class="wv-detail-body">Loading…</div>';
+    popup.innerHTML = `
+        <div class="wv-dwin">
+            <div class="wv-dwinbar">
+                <div class="wv-sheettitle"></div>
+                <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
+            </div>
+            <div class="wv-dloading">
+                <span class="wv-spinner"></span>
+                <div class="wv-dphase">Loading character…</div>
+            </div>
+        </div>`;
+    popup.querySelector('.wv-dclose').addEventListener('click', () => { popup.hidden = true; });
     detailAbort?.abort();
     detailAbort = new AbortController();
     try {
@@ -896,65 +911,231 @@ async function openDetail(item) {
         renderDetail(popup, item, body.character);
     } catch (error) {
         if (error.name === 'AbortError') return;
-        popup.innerHTML = `<div class="wv-detail-body wv-status-error">chub.ai failed — ${escapeHtml(error.message)}</div>`;
+        if (popup.hidden) return;
+        popup.innerHTML = `
+            <div class="wv-dwin">
+                <div class="wv-dwinbar">
+                    <div class="wv-sheettitle"></div>
+                    <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
+                </div>
+                <div class="wv-derror">
+                    <span class="fa-solid fa-triangle-exclamation wv-derricon"></span>
+                    <div class="wv-derrmsg">chub.ai failed — ${escapeHtml(error.message)}</div>
+                    <button class="wv-dretry" data-fullpath="${escapeHtml(item.fullPath)}">Try again</button>
+                </div>
+            </div>`;
+        popup.querySelector('.wv-dclose').addEventListener('click', () => { popup.hidden = true; });
+        popup.querySelector('.wv-dretry').addEventListener('click', () => openDetail(item));
     }
 }
 
+// _TagChip (character_detail_screen.dart:1699–1736) — NSFW/SFW/# colors,
+// others accent-dim; radius 10, padding h9 v3, 11/600.
+function detailTagChip(tag) {
+    const t = String(tag);
+    const cls = /^nsfw$/i.test(t) ? 'nsfw' : /^sfw$/i.test(t) ? 'sfw'
+        : t.startsWith('#') ? 'custom' : 'cat';
+    return `<span class="wv-dtagchip wv-dtag-${cls}">${escapeHtml(t)}</span>`;
+}
+
+// Prompt-blocks accordion sections in Glaze's order (:1751–1786);
+// non-empty only.
+const DETAIL_PROMPT_SECTIONS = [
+    ['description', 'Description'],
+    ['personality', 'Personality'],
+    ['scenario', 'Scenario'],
+    ['mes_example', 'Message Example'],
+    ['system_prompt', 'System Prompt'],
+    ['post_history_instructions', 'Post-History Instructions'],
+];
+
 function renderDetail(popup, item, character) {
     const d = character.data;
+    const name = d.name || '?';
     const book = d.character_book;
-    const bookEntries = book?.entries ? (book.entries.length ?? Object.keys(book.entries).length) : 0;
+    const greetings = [d.first_mes, ...(d.alternate_greetings ?? [])].filter(g => g && g.trim());
+
     popup.innerHTML = `
-        <div class="wv-detail-head">
-            <img class="wv-detail-poster" src="${escapeHtml(item.avatarUrl || '')}" referrerpolicy="no-referrer" alt="" />
-            <div class="wv-detail-titlebox">
-                <div class="wv-detail-name">${escapeHtml(d.name)}</div>
-                <div class="wv-detail-sub">by ${escapeHtml(d.creator)} · ${item.tokens ? `${fmtCount(item.tokens)} tokens` : ''}
-                    ${book ? ` · lorebook: ${bookEntries} entries` : ''}</div>
-                <div class="wv-detail-tags">${(d.tags ?? []).slice(0, 8).map(t => chipHtml(t)).join('')}</div>
+        <div class="wv-dwin">
+            <div class="wv-dwinbar">
+                <div class="wv-sheettitle"></div>
+                <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
             </div>
-            <button class="wv-detail-close menu_button" title="Close"><span class="fa-solid fa-xmark"></span></button>
-        </div>
-        <div class="wv-detail-body">
-            ${d.creator_notes ? `<h4>Creator's note</h4><div>${escapeHtml(d.creator_notes)}</div>` : ''}
-            ${d.description ? `<h4>Description</h4><div>${escapeHtml(d.description)}</div>` : ''}
-            ${d.personality ? `<h4>Personality</h4><div>${escapeHtml(d.personality)}</div>` : ''}
-            ${d.scenario ? `<h4>Scenario</h4><div>${escapeHtml(d.scenario)}</div>` : ''}
-            ${d.first_mes ? `<h4>First message</h4><div class="wv-detail-pre">${escapeHtml(d.first_mes.slice(0, 1200))}${d.first_mes.length > 1200 ? '…' : ''}</div>` : ''}
-            ${d.alternate_greetings?.length ? `<h4>Alternate greetings</h4><div>${d.alternate_greetings.length}</div>` : ''}
-            ${d.mes_example ? `<h4>Example dialogue</h4><div class="wv-detail-pre">${escapeHtml(d.mes_example.slice(0, 600))}${d.mes_example.length > 600 ? '…' : ''}</div>` : ''}
-            ${!d.description && !d.first_mes && !d.creator_notes ? '<div class="wv-status-error">No public definition on this card.</div>' : ''}
-        </div>
-        <div class="wv-detail-actions">
-            <a class="wv-detail-source menu_button" href="https://chub.ai/characters/${encodeURIComponent(item.fullPath)}" target="_blank" rel="noopener noreferrer">Open on source site ↗</a>
-            <button class="wv-import-button menu_button">Import</button>
-        </div>
-    `;
-    popup.querySelector('.wv-detail-close').addEventListener('click', () => { popup.hidden = true; });
-    popup.querySelector('.wv-import-button').addEventListener('click', () => {
+            <div class="wv-dscroll">
+                <div class="wv-hero">
+                    <img class="wv-heroimg ${item.nsfw && !(state.filters?.nsfw) ? 'wv-blurred' : ''}" src="${escapeHtml(item.avatarUrl || '')}" referrerpolicy="no-referrer" alt="" />
+                    <div class="wv-heroscrim"></div>
+                    <div class="wv-dheadbtns">
+                        <button class="wv-dhbtn wv-dback" title="Back"><span class="fa-solid fa-arrow-left"></span></button>
+                        <span class="wv-dhspacer"></span>
+                        <button class="wv-dhbtn wv-dkebab" title="More"><span class="fa-solid fa-ellipsis-v"></span></button>
+                    </div>
+                    <div class="wv-herocap">
+                        <div class="wv-heroname">${escapeHtml(name)}</div>
+                        <a class="wv-heroauthor" href="https://chub.ai/${escapeHtml((item.fullPath || '').split('/')[0])}" target="_blank" rel="noopener noreferrer">@${escapeHtml(d.creator || '')}</a>
+                    </div>
+                </div>
+                <div class="wv-dtabs" data-active="0">
+                    <div class="wv-dtabind"></div>
+                    <button class="wv-dtab"><span class="fa-solid fa-circle-info"></span><span>Info</span></button>
+                    <button class="wv-dtab"><span class="fa-solid fa-align-left"></span><span>Prompt Blocks</span></button>
+                    <button class="wv-dtab"><span class="fa-regular fa-images"></span><span>Images</span></button>
+                </div>
+                <div class="wv-dpanewrap">
+                    <div class="wv-dpane wv-dpane-info">
+                        <div class="wv-dtagwrap">${(d.tags ?? []).slice(0, 8).map(detailTagChip).join('')}</div>
+                        <div class="wv-dseclabel">Description</div>
+                        ${d.description
+                            ? `<div class="wv-bio">${escapeHtml(d.description).replace(/\n/g, '<br>')}</div>`
+                            : '<div class="wv-dnoprev">No preview available</div>'}
+                    </div>
+                    <div class="wv-dpane wv-dpane-prompts" hidden>
+                        ${DETAIL_PROMPT_SECTIONS.filter(([k]) => d[k]).map(([k, label], i) => `
+                            <div class="wv-acc ${k === 'description' ? 'open' : ''}">
+                                <button class="wv-acchead">
+                                    <span class="wv-acclabel">${label}</span>
+                                    <span class="fa-solid fa-chevron-up wv-accchev"></span>
+                                </button>
+                                <div class="wv-accbody">${escapeHtml(d[k]).replace(/\n/g, '<br>')}</div>
+                            </div>`).join('')}
+                        ${greetings.length ? `
+                            <div class="wv-acc ${greetings.length === 1 ? 'open' : ''}">
+                                <button class="wv-acchead">
+                                    <span class="wv-acclabel">First Messages</span>
+                                    ${greetings.length > 1 ? `<span class="wv-accbadge">${greetings.length}</span>` : ''}
+                                    <span class="fa-solid fa-chevron-up wv-accchev"></span>
+                                </button>
+                                <div class="wv-accbody">${greetings.map((g, i) => `
+                                    ${i > 0 ? '<div class="wv-greetdiv"></div>' : ''}
+                                    <div class="wv-greetrow">
+                                        <span class="wv-greetlabel">First message #${i + 1}</span>
+                                        <span class="fa-solid fa-chevron-up wv-greetchev"></span>
+                                    </div>
+                                    <div class="wv-greettext" ${greetings.length === 1 ? '' : 'hidden'}>${escapeHtml(g).replace(/\n/g, '<br>')}</div>`).join('')}
+                                </div>
+                            </div>` : ''}
+                    </div>
+                    <div class="wv-dpane wv-dpane-images" hidden>
+                        <div class="wv-dgal">
+                            <img src="${escapeHtml(item.avatarUrl || '')}" referrerpolicy="no-referrer" alt="" />
+                        </div>
+                    </div>
+                    <div class="wv-dspacer"></div>
+                </div>
+            </div>
+            <button class="wv-dfab">
+                <span class="fa-solid fa-download wv-dfabicon"></span>
+                <span class="wv-dfablabel">Import to library</span>
+            </button>
+        </div>`;
+
+    const win = popup.querySelector('.wv-dwin');
+    const close = () => { popup.hidden = true; };
+    popup.querySelector('.wv-dclose').addEventListener('click', close);
+    popup.querySelector('.wv-dback').addEventListener('click', close);
+
+    // Tab strip: pill track glass, sliding active pill, equal-width budget of
+    // 2.35 visible tabs (PillTabStrip) → 3 tabs scroll horizontally.
+    const tabs = [...popup.querySelectorAll('.wv-dtab')];
+    const panes = [...popup.querySelectorAll('.wv-dpane')];
+    const ind = popup.querySelector('.wv-dtabind');
+    const strip = popup.querySelector('.wv-dtabs');
+    const selectTab = (i) => {
+        strip.dataset.active = String(i);
+        ind.style.transform = `translateX(${i * 100}%)`;
+        tabs.forEach((t, j) => t.classList.toggle('on', j === i));
+        panes.forEach((p, j) => { p.hidden = j !== i; });
+        const el = tabs[i];
+        strip.scrollTo({ left: Math.max(0, el.offsetLeft - (strip.clientWidth - el.clientWidth) / 2), behavior: 'smooth' });
+    };
+    tabs.forEach((t, i) => t.addEventListener('click', () => selectTab(i)));
+    selectTab(0);
+
+    // Accordions: closed = 3-line clamp + fade mask; open = full (280ms).
+    popup.querySelectorAll('.wv-acc').forEach(acc => {
+        acc.querySelector('.wv-acchead').addEventListener('click', () => acc.classList.toggle('open'));
+    });
+    popup.querySelectorAll('.wv-greetrow').forEach(row => {
+        row.addEventListener('click', () => {
+            const text = row.nextElementSibling;
+            if (text) text.hidden = !text.hidden;
+        });
+    });
+
+    // Kebab (preview mode): open source site — desktop popup (240, r12 glass).
+    popup.querySelector('.wv-dkebab').addEventListener('click', e => {
+        e.stopPropagation();
+        const old = root.querySelector('.wv-dpopup');
+        if (old) { old.remove(); return; }
+        const pop = document.createElement('div');
+        pop.className = 'wv-dpopup';
+        const heroImg = popup.querySelector('.wv-heroimg');
+        const blurred = heroImg?.classList.contains('wv-blurred');
+        pop.innerHTML = `
+            <button class="wv-dpoprow" data-act="source"><span class="fa-solid fa-arrow-up-right-from-square"></span>Open source site</button>
+            ${blurred ? '<button class="wv-dpoprow" data-act="unblur"><span class="fa-solid fa-eye"></span>Unblur NSFW</button>' : ''}`;
+        win.appendChild(pop);
+        const btn = popup.querySelector('.wv-dkebab').getBoundingClientRect();
+        const winRect = win.getBoundingClientRect();
+        const pw = 240, ph = 46;
+        let x = btn.right - winRect.left - pw;
+        let y = btn.bottom - winRect.top + 4;
+        x = Math.max(12, Math.min(x, winRect.width - pw - 12));
+        y = Math.min(y, winRect.height - ph - 12);
+        pop.style.left = `${x}px`;
+        pop.style.top = `${y}px`;
+        pop.querySelectorAll('.wv-dpoprow').forEach(b => b.addEventListener('click', () => {
+            if (b.dataset.act === 'unblur') {
+                heroImg?.classList.remove('wv-blurred');
+            } else {
+                window.open(`https://chub.ai/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
+            }
+            pop.remove();
+        }));
+        setTimeout(() => document.addEventListener('click', function once(ev) {
+            if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener('click', once); }
+        }), 0);
+    });
+
+    // Import FAB → mode sheet when lorebooks exist, straight import otherwise.
+    popup.querySelector('.wv-dfab').addEventListener('click', () => {
         if (book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
 }
 
-// Glaze's import-mode options sheet — only shown when a lorebook exists (Q11).
+// Glaze's import-options sheet (GlazeBottomSheet, chrome-less content-sized
+// desktop window WITH dim): handle bar + "Import options" header + one group
+// card of three rows (icon 22 primary, label 16, hint 12).
 function showImportModeSheet(item, character) {
-    const popup = root.querySelector('.wv-detail');
-    const sheet = document.createElement('div');
-    sheet.className = 'wv-mode-sheet';
-    sheet.innerHTML = `
-        <div class="wv-mode-title">Import what?</div>
-        <button data-mode="both">Character + lorebook</button>
-        <button data-mode="character">Character only</button>
-        <button data-mode="lorebook">Lorebook only</button>
-        <button data-mode="cancel" class="wv-mode-cancel">Cancel</button>
-    `;
-    popup.appendChild(sheet);
-    sheet.addEventListener('click', e => {
-        const mode = e.target?.dataset?.mode;
+    const overlay = document.createElement('div');
+    overlay.className = 'wv-mode-overlay';
+    overlay.innerHTML = `
+        <div class="wv-modesheet">
+            <div class="wv-modehandle"></div>
+            <div class="wv-modehead">Import options</div>
+            <div class="wv-modecard">
+                <button data-mode="both">
+                    <span class="fa-solid fa-book-open wv-modeicon"></span>
+                    <span class="wv-modelabels"><span class="wv-modelabel">Character + lorebooks</span><span class="wv-modehint">Also import the attached lorebooks</span></span>
+                </button>
+                <button data-mode="character">
+                    <span class="fa-regular fa-user wv-modeicon"></span>
+                    <span class="wv-modelabels"><span class="wv-modelabel">Character only</span><span class="wv-modehint">Import the character without its lorebooks</span></span>
+                </button>
+                <button data-mode="lorebook">
+                    <span class="fa-solid fa-book wv-modeicon"></span>
+                    <span class="wv-modelabels"><span class="wv-modelabel">Lorebooks only</span><span class="wv-modehint">Pull the lorebooks without adding the character</span></span>
+                </button>
+            </div>
+        </div>`;
+    root.appendChild(overlay);
+    overlay.addEventListener('click', e => {
+        const mode = e.target?.closest('button')?.dataset?.mode;
+        if (e.target === overlay || mode === 'cancel') { overlay.remove(); return; }
         if (!mode) return;
-        sheet.remove();
-        if (mode === 'cancel') return;
+        overlay.remove();
+        root.querySelector('.wv-detail').hidden = true;
         if (mode === 'lorebook') importChubLorebookOnly(item, character);
         else importChubCharacter(item, character, mode === 'both');
     });

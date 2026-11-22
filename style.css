@@ -1103,148 +1103,457 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Detail popup (M3) — same palette                                    */
+/* Character detail — Glaze desktop window (§7): chrome'd floating     */
+/* window (empty title, close), hero 310 + floating glass header btns, */
+/* pill tab strip, Info/Prompt Blocks/Images panes, accent Import FAB  */
 /* ------------------------------------------------------------------ */
 
 .wv-detail {
     position: fixed;
     inset: 0;
-    z-index: 50;
-    background: rgba(5, 4, 8, 0.7);
-    backdrop-filter: blur(4px);
+    z-index: 70;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
-    overflow-y: auto;
-    padding: 40px 16px;
+    overflow: auto;
+    padding: 24px;
 }
 
 .wv-detail[hidden] {
     display: none;
 }
 
-.wv-detail-head,
-.wv-detail-head + .wv-detail-body {
-    background: var(--wv-card);
-    border: 1px solid var(--wv-ov);
-    width: min(720px, 100%);
-    align-self: center;
-}
-
-.wv-detail-head {
-    display: flex;
-    gap: 14px;
-    align-items: flex-start;
-    border-radius: 16px 16px 0 0;
-    border-bottom: 0;
-    padding: 16px;
+.wv-dwin {
     position: relative;
-}
-
-.wv-detail > .wv-detail-head + .wv-detail-body {
-    border-radius: 0 0 16px 16px;
-    border-top: 0;
-}
-
-.wv-detail-body {
-    background: var(--wv-card);
+    background: var(--wv-bg);
     border: 1px solid var(--wv-ov);
     border-radius: 16px;
-    padding: 24px;
-    width: min(720px, 100%);
+    width: min(92vw, 640px);
+    height: min(85vh, 900px);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 40px 4px rgba(0, 0, 0, 0.5);
+    animation: wv-window-in 180ms cubic-bezier(0.215, 0.61, 0.355, 1);
+    overflow: hidden;
 }
 
-.wv-detail-poster {
-    width: 96px;
-    height: 128px;
-    object-fit: cover;
-    border-radius: 10px;
+.wv-dwinbar {
+    display: flex;
+    align-items: center;
+    height: 52px;
+    padding: 0 8px 0 12px;
     flex-shrink: 0;
 }
 
-.wv-detail-titlebox {
-    min-width: 0;
+/* _LoadingView: 360 container, surfaceContainerHighest, centered spinner */
+.wv-dloading {
+    height: 360px;
+    margin: 0 0 0;
+    background: #1E1E1E;
+    border-radius: 24px 24px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
     flex: 1;
 }
 
-.wv-detail-name {
-    font-size: 20px;
+.wv-dphase {
+    font-size: 12px;
+    color: var(--wv-on-var);
+}
+
+/* _ErrorView: icon 48, message 13, retry = primary pill r12 h20 v10 */
+.wv-derror {
+    height: 360px;
+    background: #1E1E1E;
+    border-radius: 24px 24px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 32px;
+    text-align: center;
+    flex: 1;
+}
+
+.wv-derricon {
+    font-size: 48px;
+    color: var(--wv-on-var);
+}
+
+.wv-derrmsg {
+    font-size: 13px;
+    color: var(--wv-on-var);
+}
+
+.wv-dretry {
+    background: var(--wv-accent);
+    color: #fff;
+    border-radius: 12px;
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.wv-dscroll {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+/* _HeroSection: 310px, cover topCenter, scrim stops [0.35, 0.60, 1.0]
+   transparent → black@20% → black@75% */
+.wv-hero {
+    position: relative;
+    height: 310px;
+    overflow: hidden;
+}
+
+.wv-heroimg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top center;
+}
+
+.wv-heroimg.wv-blurred {
+    filter: blur(16px);
+    transform: scale(1.05);
+}
+
+.wv-heroscrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 35%, rgba(0, 0, 0, 0.2) 60%, rgba(0, 0, 0, 0.75) 100%);
+}
+
+/* _DetailHeaderButton: 40×40 glass circle, icon 20 primary, press 0.82 */
+.wv-dheadbtns {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    right: 16px;
+    display: flex;
+    z-index: 5;
+}
+
+.wv-dhspacer {
+    flex: 1;
+}
+
+.wv-dhbtn {
+    width: 40px;
+    height: 40px;
+    border-radius: 20px;
+    background: rgba(25, 25, 26, 0.8);
+    border: 1px solid rgba(196, 42, 74, 0.1);
+    color: var(--wv-accent);
+    font-size: 15px;
+    display: grid;
+    place-items: center;
+    transition: transform 80ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.wv-dhbtn:active {
+    transform: scale(0.82);
+}
+
+/* Caption: left/right 16, bottom 16; name 22/700 white + shadow blur 6;
+   author 13 (@creator primary w600 tappable) */
+.wv-herocap {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+}
+
+.wv-heroname {
+    font-size: 22px;
     font-weight: 700;
+    color: #fff;
+    line-height: 1.25;
+    max-height: 58px;
+    overflow: hidden;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
+    overflow-wrap: anywhere;
+}
+
+.wv-heroauthor {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--wv-accent);
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+    text-decoration: none;
+    margin-top: 2px;
+}
+
+/* PillTabStrip: track 42 glass (r21, primary@18% border), padding 16,16,16,8;
+   active pill inset 3, r18, primary@80% fill, white@14% border; 2.35 budget */
+.wv-dtabs {
+    position: relative;
+    display: flex;
+    margin: 16px 16px 8px;
+    height: 42px;
+    border-radius: 21px;
+    background: var(--wv-glass);
+    border: 1px solid rgba(196, 42, 74, 0.18);
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex-shrink: 0;
+}
+
+.wv-dtabind {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 0;
+    width: calc((100% - 6px) / 2.35);
+    border-radius: 18px;
+    background: rgba(196, 42, 74, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    transition: transform 250ms cubic-bezier(0.215, 0.61, 0.355, 1);
+    pointer-events: none;
+}
+
+.wv-dtab {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 calc((100% - 6px) / 2.35);
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--wv-accent);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.wv-dtab span:first-child {
+    font-size: 15px;
+}
+
+.wv-dtab.on {
     color: #fff;
 }
 
-.wv-detail-sub {
-    color: var(--wv-on-var);
-    font-size: 12.5px;
-    margin-top: 3px;
+/* Panes */
+.wv-dpanewrap {
+    flex: 1;
 }
 
-.wv-detail-tags {
+/* _TagChip: h9 v3, r10, 11/600; NSFW/SFW/#/accent-dim color tokens */
+.wv-dtagwrap {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 9px;
+    gap: 6px;
+    padding: 8px 16px 0;
 }
 
-.wv-detail-close {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    color: var(--wv-on-var);
-    font-size: 18px;
+.wv-dtagchip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 9px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
-.wv-detail-body {
-    color: rgba(255, 255, 255, 0.8);
+.wv-dtag-nsfw {
+    background: rgba(255, 68, 68, 0.2);
+    color: #FF4444;
+    border-color: rgba(255, 68, 68, 0.3);
+}
+
+.wv-dtag-sfw {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+    border-color: rgba(76, 175, 80, 0.32);
+}
+
+.wv-dtag-custom {
+    background: rgba(0, 255, 255, 0.1);
+    color: #00CCCC;
+    border-color: rgba(0, 255, 255, 0.2);
+}
+
+.wv-dtag-cat {
+    background: rgba(196, 42, 74, 0.12);
+    color: var(--wv-accent);
+    border-color: rgba(196, 42, 74, 0.2);
+}
+
+/* Section label: 11/600 ls0.77 uppercase, white@35% */
+.wv-dseclabel {
+    padding: 16px 16px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.77px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+/* _BioMarkdown: pad 16, bg black@48%, r8, border purple@10%, 13.5/1.55 @75% */
+.wv-bio {
+    margin: 0 16px 4px;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.48);
+    border: 1px solid rgba(139, 92, 246, 0.1);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.75);
     font-size: 13.5px;
     line-height: 1.55;
     overflow-wrap: anywhere;
 }
 
-.wv-detail-body h4 {
+.wv-dnoprev {
+    padding: 40px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 13px;
+}
+
+/* Accordion cards: margin 16,16,16,0, bg white@5%, r16, border white@5% */
+.wv-acc {
+    margin: 16px 16px 0;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.wv-acchead {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 14px 12px 14px 16px;
+    text-align: left;
+}
+
+.wv-acclabel {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.65px;
+    text-transform: uppercase;
     color: var(--wv-accent);
+}
+
+.wv-accbadge {
+    margin-left: 8px;
+    padding: 2px 7px;
+    border-radius: 8px;
+    background: rgba(196, 42, 74, 0.12);
+    border: 1px solid rgba(196, 42, 74, 0.2);
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.77px;
-    text-transform: uppercase;
-    margin: 24px 0 4px;
+    color: var(--wv-accent);
 }
 
-.wv-detail-body h4:first-child {
-    margin-top: 0;
+.wv-accchev {
+    margin-left: auto;
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.5);
+    transform: rotate(180deg);
+    transition: transform 280ms cubic-bezier(0.215, 0.61, 0.355, 1);
 }
 
-.wv-detail-pre {
-    white-space: pre-wrap;
+.wv-acc.open .wv-accchev {
+    transform: rotate(0deg);
 }
 
-.wv-detail-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 14px 0;
-    width: min(720px, 100%);
-    align-self: center;
-}
-
-.wv-detail-actions a,
-.wv-detail-actions button {
-    border-radius: 12px;
-    padding: 10px 16px;
+/* _CollapsibleText: closed 3-line clamp + ShaderMask fade (stops 0.45); 280ms */
+.wv-accbody {
+    max-height: 96px;
+    padding: 0 16px 14px;
+    color: rgba(255, 255, 255, 0.75);
     font-size: 13.5px;
-    font-weight: 600;
-    text-decoration: none;
+    line-height: 1.55;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    -webkit-mask-image: linear-gradient(to bottom, black 45%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 45%, transparent 100%);
+    overflow-wrap: anywhere;
+    transition: max-height 280ms cubic-bezier(0.215, 0.61, 0.355, 1);
 }
 
-.wv-detail-source {
-    background: var(--wv-glass);
-    border: 1px solid var(--wv-glass-border);
-    color: var(--wv-on);
+.wv-acc.open .wv-accbody {
+    max-height: 2000px;
+    -webkit-line-clamp: unset;
+    -webkit-mask-image: none;
+    mask-image: none;
+    padding-bottom: 16px;
+}
+
+/* First-message rows: divider 1px white@5%, label 12/600 ls0.5 @50% */
+.wv-greetdiv {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.wv-greetrow {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px 10px 16px;
+    cursor: pointer;
+}
+
+.wv-greetlabel {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.wv-greetchev {
+    margin-left: auto;
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.wv-greettext {
+    padding: 0 16px 12px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13.5px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+/* Images tab: single avatar cell (chub preview has no gallery) */
+.wv-dgal {
+    padding: 8px 16px;
+}
+
+.wv-dgal img {
+    max-width: 100%;
+    border-radius: 16px;
+    display: block;
+}
+
+.wv-dspacer {
+    height: 100px;
 }
 
 /* GlazeFab: height 56 stadium, primary fill, white@18% border, label 15/700,
-   shadows black .55 blur 28 + accent .4 blur 24 */
-.wv-import-button {
+   shadows black .55 blur 28 + accent .4 blur 24; right 16 bottom 16 */
+.wv-dfab {
+    position: absolute;
+    right: 16px;
+    bottom: 16px;
     height: 56px;
     display: inline-flex;
     align-items: center;
@@ -1259,48 +1568,129 @@
     box-shadow: 0 10px 28px 2px rgba(0, 0, 0, 0.55), 0 4px 24px 0 rgba(196, 42, 74, 0.4);
 }
 
-.wv-detail-actions {
-    position: relative;
+.wv-dfab:active .wv-dfabicon {
+    transform: scale(0.92);
 }
 
-/* Import-mode sheet (Glaze options sheet) */
-.wv-mode-sheet {
+.wv-dfabicon {
+    font-size: 16px;
+}
+
+/* Kebab desktop popup: width 240, r12 glass, shadow black .35 blur 24 */
+.wv-dpopup {
     position: absolute;
-    bottom: 18px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(340px, 90%);
-    background: var(--wv-card);
+    width: 240px;
+    background: var(--wv-bg);
     border: 1px solid var(--wv-ov);
-    border-radius: 14px;
-    padding: 14px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7);
+    border-radius: 12px;
+    box-shadow: 0 0 24px 1px rgba(0, 0, 0, 0.35);
+    padding: 4px 0;
+    z-index: 20;
+}
+
+.wv-dpoprow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 14px;
+    font-size: 14px;
+    color: var(--wv-on);
+    text-align: left;
+}
+
+.wv-dpoprow:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.wv-dpoprow span:first-child {
+    font-size: 13px;
+    color: var(--wv-on-var);
+}
+
+/* Import-options sheet: chrome-less content-sized window WITH dim (black54) */
+.wv-mode-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: rgba(0, 0, 0, 0.54);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.wv-modesheet {
+    background: var(--wv-bg);
+    border: 1px solid var(--wv-ov);
+    border-radius: 16px;
+    width: min(92vw, 420px);
+    box-shadow: 0 0 40px 4px rgba(0, 0, 0, 0.5);
+    padding-bottom: 16px;
+    animation: wv-window-in 180ms cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.wv-modehandle {
+    width: 32px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.35);
+    margin: 10px auto;
+}
+
+.wv-modehead {
+    padding: 0 20px 16px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--wv-on);
+}
+
+.wv-modecard {
+    margin: 0 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.wv-modecard button {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    padding: 14px 16px;
+    text-align: left;
+}
+
+.wv-modecard button + button {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wv-modecard button:active {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.wv-modeicon {
+    width: 22px;
+    font-size: 18px;
+    color: var(--wv-on-var);
+    text-align: center;
+}
+
+.wv-modelabels {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    z-index: 55;
+    gap: 2px;
+    min-width: 0;
 }
 
-.wv-mode-title {
-    text-align: center;
-    font-weight: 700;
-    font-size: 14px;
-    color: #fff;
-    margin-bottom: 4px;
-}
-
-.wv-mode-sheet button {
-    background: var(--wv-glass);
-    border: 1px solid var(--wv-glass-border);
-    border-radius: 10px;
+.wv-modelabel {
+    font-size: 16px;
     color: var(--wv-on);
-    padding: 10px;
-    font-size: 13.5px;
-    font-weight: 600;
 }
 
-.wv-mode-sheet button:hover {
-    background: rgba(25, 25, 26, 0.95);
+.wv-modehint {
+    font-size: 12px;
+    color: var(--wv-on-var);
 }
 
 /* ------------------------------------------------------------------ */

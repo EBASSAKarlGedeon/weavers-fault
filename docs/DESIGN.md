@@ -141,7 +141,17 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    sort/window resolution, lease store, error classification). Glaze ships with **no**
    client id (`--dart-define`, default empty) and DataCat must approve an integration id,
    so this path cannot be exercised here; nothing in the UI depends on it.
-6. **M6 — extras**: batch queue, favorites, JannyAI (implemented 2026-11-23), polish.
+6. **M6 — extras**: JannyAI (implemented 2026-11-23), polish (done 2026-11-23), batch queue.
+   **Dropped:** favorites — user decision 2026-11-23 ("we don't really need Favorites"); the
+   `favorites` settings key stays unused rather than being removed, since removing it would churn
+   synced settings for nothing.
+   **Polish, done and measured:** phone width (SillyTavern's `html` is 0 px tall on its mobile
+   layout, so every full-screen layer needed explicit `100dvh`; the drawer was a 14 px strip and
+   the filter sheet centred at y = −388 — see PITFALLS #12), the grid goes 2-up below 620 px,
+   the tag catalogue states its provenance with a refresh action, per-provider tag vocabularies
+   are reset on switch (PITFALLS #13), and a browser failure now offers "Show the browser window",
+   which moves the hidden automation window on screen without giving it a taskbar button.
+   **Next:** JanitorAI. Routes/adapters exist for chub, saucepan, datacat, janny only.
    **JannyAI** (`src/endpoints/weavers-vault-janny*.js`, routes `/api/weavers-vault/janny/*`).
    *Corrected 2026-11-23:* an earlier note here concluded detail scraping was impossible because
    `GET https://jannyai.com/characters/<id>` from Node answers `403 cf-mitigated: challenge`. That

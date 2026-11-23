@@ -141,7 +141,25 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    sort/window resolution, lease store, error classification). Glaze ships with **no**
    client id (`--dart-define`, default empty) and DataCat must approve an integration id,
    so this path cannot be exercised here; nothing in the UI depends on it.
-6. **M6 — extras**: batch queue, favorites, JannyAI-search decision (1-day timebox), polish.
+6. **M6 — extras**: batch queue, favorites, JannyAI decision (measured 2026-11-23, below), polish.
+   **JannyAI, measured (2026-11-23):** search is portable, the *definition* is not.
+   - `POST https://search.jannyai.com/multi-search` with `Authorization: Bearer <64-hex fallback
+     token>` (hardcoded fallback still accepted) → 200. Body shape and headers ported from Glaze
+     are correct as documented in `glaze-sources-survey.md` §3.
+   - Index `janny-characters` **does not carry the definition**. A hit has exactly:
+     `avatar, createdAt, createdAtStamp, description (blurb HTML), id, isLowQuality, isNsfw,
+     name, permanentToken (a number, 91), tagIds, totalToken` — no `personality`, `scenario`,
+     `firstMessage`, `exampleDialogs`, `creatorUsername`.
+   - `GET /indexes/janny-characters/documents/<id>` → 403 `invalid_api_key` (document route needs
+     an admin key, the search token cannot read documents).
+   - `GET https://jannyai.com/characters/<id>` from Node → 403 with `cf-mitigated: challenge`
+     (Cloudflare managed challenge). So detail scraping is impossible server-side, exactly as the
+     survey warned.
+   Consequence: a search-only provider can browse and resolve names/avatars/tokens, but cannot
+   build an importable card — the definition only exists behind the challenge. Options: drop
+   JannyAI in v1 (the roadmap's stated fallback), or implement it in v2 through the Electron
+   webview together with JanitorAI. A third option exists only if the site's own client exposes a
+   JSON endpoint for character detail, which one DevTools capture would settle.
 7. **v2 (separate effort)**: JanitorAI + Janny-detail via Electron webview.
 
 ## Attribution & legal

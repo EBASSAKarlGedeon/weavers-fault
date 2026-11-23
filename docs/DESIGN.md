@@ -92,6 +92,23 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    same reason). While browsing, the panel hides the grid's furniture; this also exposed
    that row rules outrank the UA `[hidden]` rule, now root-fixed with
    `#wv-root [hidden] { display: none !important }`.
+   **Blanking bug — found and fixed 2026-11-23 (commit `93d0618`)**: provenance is stamped with
+   `POST /api/characters/edit`, which does **not** merge: it rebuilds the card through
+   `charaFormatData(request.body)` and assigns every text field from the flat body fields
+   (`description`, `first_mes`, `personality`, `scenario`, `mes_example`, `creator_notes`,
+   `system_prompt`, `post_history_instructions`, `alternate_greetings`, `tags`, `creator`,
+   `character_version`). A payload of `{ch_name, avatar_url, json_data}` therefore imported the
+   card correctly and then erased its text. Measured on the Testing worktree (8010), same
+   character: `desc 5213 first 1022 tags 5` → after `/edit` → `0 / 0 / 0`; after
+   `/merge-attributes` → unchanged `5213 / 1022 / 5` **with** `vault_source=datacat` written.
+   This is why DataCat's own extension produced full characters while the vault produced empty
+   ones from an identical download and an identical import request — the extension performs no
+   post-import write at all, so identical requests hid a diverging sequence. Stamping now goes
+   through `stampVaultProvenance()` → `POST /api/characters/merge-attributes` (single mode:
+   deepMerge, only the sent keys change) for **both** DataCat and chub; the chub lorebook link
+   rides the same merge. Verified live after the fix: `datacat_live_with_a_teacher…` stamped and
+   `description 830 / first_mes 4123`. Full write-up + the rules that prevent a repeat:
+   `docs/PITFALLS.md` (entry 1), enforced by `tests/vault/provenance-stamp.test.js`.
    **Name-only cards (investigated 2026-11-23; measured, not inferred)**: some imports
    arrive with the name and artwork but no description. Measured evidence:
    - Static reading of the site's bridge (`st-bridge-v14`) and the three-subagent audit:

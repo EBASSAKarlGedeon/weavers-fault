@@ -1680,6 +1680,45 @@ function readPngCardPayload(payload) {
 }
 
 /**
+ * Stamp vault provenance onto an already-imported character.
+ *
+ * `POST /api/characters/edit` must NOT be used for this. Its handler rebuilds
+ * the card with `charaFormatData(request.body)`, which assigns every text field
+ * from the FLAT fields of the request body
+ * (`_.set(char, 'description', data.description || '')`, and the same for
+ * personality/scenario/first_mes/mes_example/creator_notes/system_prompt/openings/
+ * tags/creator/version). A payload carrying only `ch_name` + `json_data` therefore
+ * preserved the foreign keys but blanked all text: measured on the DataCat path,
+ * the PNG imported with ~7.4k description and the stamp call left 0.
+ *
+ * `POST /api/characters/merge-attributes` (single mode) reads the card, applies a
+ * deep merge and writes it back, so only the keys sent change — provenance lands
+ * and every text field is untouched.
+ *
+ * @param {string} avatar Imported avatar file name (e.g. `datacat_x.png`)
+ * @param {Record<string, string>} extensions Provenance keys to merge in
+ * @returns {Promise<boolean>} Whether the stamp was written
+ */
+async function stampVaultProvenance(avatar, extensions) {
+    try {
+        const response = await fetch('/api/characters/merge-attributes', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ avatar, data: { extensions } }),
+        });
+        if (!response.ok) {
+            const detail = await response.text().catch(() => '');
+            console.error(`[${extensionName}] provenance stamp failed (${response.status})`, detail);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        console.error(`[${extensionName}] provenance stamp failed`, error);
+        return false;
+    }
+}
+
+/**
  * Character text length from a decoded V2/V3 card. Used to catch DataCat's
  * name-only cards before they become blank characters in the library.
  */
@@ -1902,31 +1941,27 @@ async function importDatacatBridgeCard(payload) {
         });
         await getCharacters();
 
-        // Provenance for the ledger + the source link. Same shape the other
-        // providers use: edit the live character object, then PUT the whole card
-        // back — the endpoint rejects a partial payload ("invalid name").
+        // Provenance for the ledger + the source link, merged in place. Never
+        // `POST /api/characters/edit` here: that handler rebuilds the card from
+        // flat form fields and blanks every text field (see stampVaultProvenance).
         const target = characters.find(c => c.avatar === fileName);
         if (!target) {
             console.warn("[Weaver's Vault] DataCat import landed but could not be found for stamping");
         } else {
-            target.data.extensions = target.data.extensions ?? {};
-            target.data.extensions.vault_source = 'datacat';
-            target.data.extensions.vault_full_path = id;
-            target.data.extensions.vault_url = `https://datacat.run/characters/${id}`;
-            const editResponse = await fetch('/api/characters/edit', {
-                method: 'POST',
-                headers: getRequestHeaders(),
-                body: JSON.stringify({
-                    ch_name: target.name,
-                    avatar_url: target.avatar,
-                    json_data: JSON.stringify(target),
-                }),
+            const stamped = await stampVaultProvenance(fileName, {
+                vault_source: 'datacat',
+                vault_full_path: id,
+                vault_url: `https://datacat.run/characters/${id}`,
             });
-            if (!editResponse.ok) {
-                console.error("[Weaver's Vault] DataCat provenance stamp failed:", editResponse.status);
+            if (!stamped) {
                 toastr.warning('Imported, but provenance stamping failed.', "Weaver's Vault");
             }
             await getCharacters();
+            const after = characters.find(c => c.avatar === fileName);
+            const kept = String(after?.data?.description ?? '').length;
+            if (after && stamped && kept === 0) {
+                console.warn("[Weaver's Vault] DataCat import landed with an empty description after stamping");
+            }
         }
 
         postDatacatAck(requestId, 'ok', 'Imported into Loreweaver.', {
@@ -2129,31 +2164,27 @@ async function importChubCharacter(item, character, withBook) {
         if (!target) {
             console.warn(`[${extensionName}] imported but could not locate character for provenance stamp`);
         } else {
-            target.data.extensions = target.data.extensions ?? {};
-            target.data.extensions.vault_source = 'chub';
-            target.data.extensions.vault_url = `https://chub.ai/characters/${item.fullPath}`;
+            // Stamp provenance by merging, never via `/api/characters/edit`
+            // (that endpoint rebuilds the card from flat fields and blanks text).
             let bookName;
             if (withBook && target.data.character_book) {
                 bookName = target.data.character_book.name || `${target.name}'s Lorebook`;
                 const converted = convertCharacterBook(target.data.character_book);
                 await saveWorldInfo(bookName, converted, true);
                 await updateWorldInfoList();
-                target.data.extensions.world = bookName;
                 toastr.success(`Lorebook '${bookName}' imported and linked.`, "Weaver's Vault");
             }
-            // Stamp provenance via the standard character edit endpoint.
-            const editResponse = await fetch('/api/characters/edit', {
-                method: 'POST',
-                headers: getRequestHeaders(),
-                body: JSON.stringify({
-                    ch_name: target.name,
-                    avatar_url: target.avatar,
-                    json_data: JSON.stringify(target),
-                }),
-            });
-            if (!editResponse.ok) {
-                console.error(`[${extensionName}] provenance stamp edit failed (${editResponse.status}) — card imported but not stamped`);
+            const stampExtensions = {
+                vault_source: 'chub',
+                vault_url: `https://chub.ai/characters/${item.fullPath}`,
+            };
+            if (bookName) stampExtensions.world = bookName;
+            const stamped = await stampVaultProvenance(target.avatar, stampExtensions);
+            if (!stamped) {
+                console.error(`[${extensionName}] provenance stamp failed — card imported but not stamped`);
                 toastr.warning('Imported, but provenance stamping failed — cleanup tests may refuse to remove this card.', "Weaver's Vault");
+            } else {
+                target.data.extensions = { ...(target.data.extensions ?? {}), ...stampExtensions };
             }
             await getCharacters();
         }

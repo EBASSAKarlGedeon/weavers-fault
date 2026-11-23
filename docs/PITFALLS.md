@@ -292,3 +292,57 @@ it writes "Crashed" while running and does not reliably flush the clean value on
 3. Add `--hide-crash-restore-bubble` as the last line of defence.
 4. A browser-UI dialog cannot be hidden by positioning or window styles, so it must never be
    allowed to appear; assume any such prompt will land in the middle of the user's screen.
+
+---
+
+## 12. `position: fixed; inset: 0` collapses when SillyTavern's `html` has height 0
+
+**Symptom.** At phone width the vault "opened" but showed only a 14 px strip at the top of the
+screen; the filter sheet's close button sat outside the viewport and could not be clicked. At
+desktop width everything was perfect.
+
+**Measured cause.** On SillyTavern's small-screen layout `document.documentElement` computes to
+`height: 0px` (body is `position: fixed` with the real height). A fixed element is positioned
+against that box, so `inset: 0` produced `height: 0` for `#wv-root` (the shell then painted a
+14 px sliver), and for every full-screen layer inside it — the filter sheet centred its 776 px
+body in a 0 px box and landed at **y = −388**, i.e. its header off-screen. Setting
+`height: 100dvh` on the root measured 844 px immediately, which confirmed the mechanism.
+
+**Rules.**
+1. Never size a full-screen overlay with `inset: 0` alone when the host page is not yours: give
+   it explicit viewport units (`height: 100vh` then `height: 100dvh`) and keep the width from
+   left/right so a desktop scrollbar cannot push `100vw` past the edge.
+2. Apply it to *every* full-screen fixed layer (sheet, detail, sub-sheet, mode overlay), not just
+   the outermost one — each one resolves against the same zero-height box.
+3. A flex child that must scroll needs `min-height: 0`; without it the sheet grows past the
+   viewport instead of scrolling, and `max-height: calc(100dvh - 24px)` does the rest.
+4. Test at 390 px against the real SillyTavern UI. This class of bug cannot appear in a screenshot
+   of the extension served on its own.
+
+---
+
+## 13. A provider's tag vocabulary is not another provider's
+
+**Symptom.** Two silent no-ops found in the same pass:
+- After switching provider, the filter sheet still listed the *previous* provider's tags. They go
+  to the server as names, resolve to nothing for the new source, and the search quietly ignores
+  them.
+- The JannyAI "tag list is old / built-in" note never appeared, even with a six-day-old cache.
+
+**Measured causes.** `setSource()` reset the query, filters and sort, but kept `state.tagCloud`;
+and the note compared ages with `Date.parse(fetchedAt)` where the server sends epoch
+**milliseconds as a number** — `Date.parse()` wants a string and returns `NaN`, so the age test was
+always false and the note stayed hidden.
+
+**Rules.**
+1. Clear per-provider caches (`tagCloud`, `tagSuggestions`, `tagMeta`, tag query) in `setSource()`
+   next to the other per-provider state. A vocabulary is part of the provider contract.
+2. Check the wire type before parsing: numbers stay numbers (`typeof x === 'number' ? x : Date.parse(x)`).
+   A "condition never true" bug looks exactly like a missing feature.
+3. Verify a note/indicator by making it appear: age the cache to six days (inside the seven-day
+   TTL, so it is not auto-refreshed) and confirm the text *and* its Refresh action, then confirm
+   it disappears after a refresh.
+4. Also: revealing the automation window for a manual Cloudflare check re-adds its taskbar button
+   even though `WS_EX_TOOLWINDOW` is still set — the shell re-evaluates when the window is shown.
+   Toggling the bit off and on (with `SWP_FRAMECHANGED` each time) removes the button again while
+   the window stays visible and clickable.

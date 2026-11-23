@@ -268,6 +268,7 @@ function ensureOverlay() {
                                     <input type="text" class="wv-tagfilter" placeholder="Search tags..." spellcheck="false" />
                                     <button class="wv-tagclear" hidden><span class="fa-solid fa-xmark"></span></button>
                                 </div>
+                                <div class="wv-tagmeta" hidden></div>
                                 <div class="wv-tagcloud"></div>
                                 <button class="wv-showall" hidden></button>
                             </div>
@@ -348,6 +349,7 @@ const state = {
     filters: null,       // committed filter model (Glaze CatalogFilters mirror)
     tagCloud: null,      // full tag index for the filter sheet (loaded lazily)
     tagCloudLoading: false,
+    tagMeta: null,          // {source, fetchedAt} for the JannyAI vocabulary
     tagQuery: '',
     tagSuggestions: [],
     tagSuggestionsLoading: false,
@@ -936,6 +938,7 @@ async function ensureTagCloud() {
             const body = await r.json();
             if (!r.ok) throw new Error(body?.error || `JannyAI answered ${r.status}`);
             state.tagCloud = (body.tags ?? []).map(t => String(t.name ?? '').trim()).filter(Boolean);
+            state.tagMeta = { source: body.source ?? null, fetchedAt: body.fetchedAt ?? null };
         } else {
             const r = await fetch('/api/weavers-vault/chub/tags', {
                 method: 'POST',
@@ -979,7 +982,68 @@ async function fetchTagSuggestions(q) {
 // FilterTagPicker render: selected chips row → search → grid (local matches,
 // starts-with first + remote suggestions + "add raw query" chip) → folding
 // at collapsedCount 24, folding only when the pool exceeds 24 + 6.
+/**
+ * Say where the tag vocabulary came from.
+ *
+ * JannyAI's labels are read from its own sidebar and cached, so they can be
+ * missing (built-in list) or old. Saying so beats a filter sheet that silently
+ * offers a stale or incomplete list, and the refresh is one click.
+ */
+function renderTagMeta() {
+    const el = root.querySelector('.wv-tagmeta');
+    if (!el) return;
+    const meta = state.tagMeta;
+    if (state.source !== 'janny' || !meta) {
+        el.hidden = true;
+        el.innerHTML = '';
+        return;
+    }
+    // fetchedAt is epoch *milliseconds as a number*; Date.parse() wants a string
+    // and returns NaN for this, which silently hid the whole note.
+    const stamp = typeof meta.fetchedAt === 'number' ? meta.fetchedAt : Date.parse(String(meta.fetchedAt));
+    const ageDays = Number.isFinite(stamp) ? Math.floor((Date.now() - stamp) / 86_400_000) : null;
+    let text = '';
+    if (meta.source === 'fallback') {
+        text = "Built-in tag list — JannyAI's own list could not be read just now.";
+    } else if (ageDays !== null && ageDays >= 6) {
+        text = `Tag list read ${ageDays} days ago.`;
+    }
+    el.hidden = !text;
+    el.innerHTML = text
+        ? `<span>${escapeHtml(text)}</span><button class="wv-tagrefresh">Refresh</button>`
+        : '';
+    el.querySelector('.wv-tagrefresh')?.addEventListener('click', refreshJannyTags);
+}
+
+/** Re-read JannyAI's tag list, keeping the current one if the read fails. */
+async function refreshJannyTags(event) {
+    const button = event?.currentTarget;
+    if (button) button.disabled = true;
+    try {
+        const r = await fetch('/api/weavers-vault/janny/tags?refresh=1', { headers: getRequestHeaders() });
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.error || `JannyAI answered ${r.status}`);
+        const names = (body.tags ?? []).map(t => String(t.name ?? '').trim()).filter(Boolean);
+        if (!names.length) throw new Error('JannyAI returned no tags.');
+        state.tagCloud = names;
+        state.tagMeta = { source: body.source ?? null, fetchedAt: body.fetchedAt ?? null };
+        // Drop selections that no longer exist, so a filter cannot become a no-op.
+        const known = new Set(names.map(n => n.toLowerCase()));
+        for (const tag of [...state.filters.tags]) {
+            if (!known.has(tag.toLowerCase())) state.filters.tags.delete(tag);
+        }
+        saveSettingsQuiet();
+        renderTagPicker();
+        toastr.success(`Tag list refreshed (${names.length} tags).`, "Weaver's Vault");
+    } catch (error) {
+        toastr.error(error.message, "Weaver's Vault tags");
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 function renderTagPicker() {
+    renderTagMeta();
     const f = state.filters;
     if (!f) return;
     const cloud = root.querySelector('.wv-tagcloud');
@@ -1139,7 +1203,7 @@ async function openDetail(item, preloaded = null) {
                 signal: detailAbort.signal,
             });
             const payload = await r.json();
-            if (!r.ok) throw new Error(payload?.error || `JannyAI answered ${r.status}`);
+            if (!r.ok) throw vaultError(payload?.error || `JannyAI answered ${r.status}`, payload?.code, r.status);
             jannyFiles.set(item.fullPath, payload.file);
             renderDetail(popup, item, payload.character);
             return;
@@ -1162,11 +1226,30 @@ async function openDetail(item, preloaded = null) {
                 <div class="wv-derror">
                     <span class="fa-solid fa-triangle-exclamation wv-derricon"></span>
                     <div class="wv-derrmsg">${item.source === 'datacat' ? 'DataCat' : item.source === 'janny' ? 'JannyAI' : 'chub.ai'} failed — ${escapeHtml(error.message)}</div>
-                    <button class="wv-dretry" data-fullpath="${escapeHtml(item.fullPath)}">Try again</button>
+                    <div class="wv-derractions">
+                        ${error.code === 'janny_browser' ? '<button class="wv-dshowbrowser">Show the browser window</button>' : ''}
+                        <button class="wv-dretry" data-fullpath="${escapeHtml(item.fullPath)}">Try again</button>
+                    </div>
                 </div>
             </div>`;
         wireWinChrome(popup, () => { popup.hidden = true; });
         popup.querySelector('.wv-dretry').addEventListener('click', () => openDetail(item));
+        // The automation window is parked offscreen with no taskbar button, so a
+        // check that wants one human click needs this: move it into view.
+        popup.querySelector('.wv-dshowbrowser')?.addEventListener('click', async event => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+                const r = await fetch('/api/weavers-vault/janny/browser/focus', { method: 'POST', headers: getRequestHeaders() });
+                const body = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(body?.error || `The browser answered ${r.status}`);
+                toastr.info('A Chrome window was brought to the front. Finish the check there, then press “Try again”.', "Weaver's Vault");
+            } catch (err) {
+                toastr.error(err.message, "Weaver's Vault");
+            } finally {
+                button.disabled = false;
+            }
+        });
     }
 }
 
@@ -1406,6 +1489,21 @@ function showImportModeSheet(item, character) {
     });
 }
 
+/**
+ * An Error that keeps the server's machine-readable code, so the UI can offer the
+ * action that matches the failure instead of one generic retry.
+ * @param {string} message
+ * @param {string|undefined} code
+ * @param {number} status
+ * @returns {Error}
+ */
+function vaultError(message, code, status) {
+    const error = new Error(message);
+    error.code = code;
+    error.status = status;
+    return error;
+}
+
 function ledgerCheck(item) {
     const s = settings();
     const source = item.source ?? 'chub';
@@ -1502,6 +1600,16 @@ function setSource(source) {
         if (search) search.value = '';
         state.filters = { ...committedFilters(), tagNames: [], tags: new Set() };
         commitFilters();
+        // The tag vocabulary belongs to the provider: chub topics carry no meaning
+        // in JannyAI's index (which filters numeric ids), so keeping the old cloud
+        // offered filters that never resolve — a silent no-op. Drop it, and the
+        // sheet re-reads the new provider's list on open.
+        state.tagCloud = null;
+        state.tagSuggestions = [];
+        state.tagMeta = null;
+        state.tagQuery = '';
+        const tagFilter = root.querySelector('.wv-tagfilter');
+        if (tagFilter) tagFilter.value = '';
         // Sorts are a per-provider vocabulary: keep the key only when the new
         // source knows it, else fall back to that source's default order.
         const known = source === 'datacat' ? DATACAT_SORTS
@@ -2264,7 +2372,7 @@ async function importJannyCharacter(item, character) {
                 body: JSON.stringify({ id: item.fullPath, name: item.name }),
             });
             const payload = await r.json();
-            if (!r.ok) throw new Error(payload?.error || `JannyAI answered ${r.status}`);
+            if (!r.ok) throw vaultError(payload?.error || `JannyAI answered ${r.status}`, payload?.code, r.status);
             cardFile = payload.file;
             jannyFiles.set(item.fullPath, cardFile);
             character = payload.character;

@@ -1787,7 +1787,7 @@ function wireDatacatBridge() {
             const existing = datacatFindImported(data.metadata);
             if (existing) {
                 postDatacatAck(requestId, 'existing', 'Found local copy.', {
-                    datacatCharacterId: id, avatar: existing.avatar, phase: 'Chat ready', step: 'existing', stepLabel: 'Open local copy',
+                    datacatCharacterId: id, avatar: existing.avatar, phase: 'Chat ready', step: 'open-existing', stepLabel: 'Open local copy',
                 });
                 return;
             }
@@ -1923,7 +1923,7 @@ async function importDatacatBridgeCard(payload) {
         }
 
         postDatacatAck(requestId, 'ok', 'Imported into Loreweaver.', {
-            datacatCharacterId: id, avatar: fileName, phase: 'Import done', step: 'done', stepLabel: 'Imported',
+            datacatCharacterId: id, avatar: fileName, phase: 'Chat ready', step: 'open-chat', stepLabel: 'Open chat',
         });
         toastr.success(`Imported ${name}`, "Weaver's Vault");
     } finally {

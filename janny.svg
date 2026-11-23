@@ -1,0 +1,5 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="JannyAI">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#1b1030"/>
+  <path d="M44 14v24.5c0 6.9-4.9 11.5-11.6 11.5-5.9 0-10.2-3.4-11.4-8.6l7-1.7c.6 2.6 2.2 4.1 4.5 4.1 2.7 0 4.5-1.9 4.5-5V14h7z" fill="#b48cff"/>
+  <circle cx="47.5" cy="47.5" r="4.5" fill="#7de2d1"/>
+</svg>

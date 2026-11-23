@@ -19,7 +19,7 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
 | DataCat | YES, lights up when key arrives | Official `api/client/v1` REST; device-flow token; hosted verification lease | client id (settings field) + user token |
 | DataCat fallback | if client-id path fails | Embed `datacat.run` in sandboxed iframe + postMessage bridge (PREPARE/CARD → PNG → `/api/characters/import`), like the official extension | client-link (hosted) |
 | Saucepan | YES | URL-driven extraction (`/api/v1/companion/definition`), decoy-fragment reassembly (FNV-1a proof, `key ^ mask` sort, 32-bit math → `Math.imul`) | paste-only bearer token (Q14) |
-| JannyAI | search-only if it ports in ~1 day, else dropped | Meilisearch `search.jannyai.com` (plain HTTP, anonymous token scraped from JS bundle + hardcoded fallback); detail pages need CF-cleared browser → skip in v1 | none |
+| JannyAI | done (search + import) | Meilisearch `search.jannyai.com` (plain HTTP, token from settings or the public fallback); detail pages read inside a real Chrome session parked on the origin, exactly like Glaze's WebView proxy | none |
 | JanitorAI | **v2** | Mandatory webview (CF binds clearance to TLS fingerprint). v2 plan: Electron webview in packaged app (Q6a) | Supabase cookies |
 
 ## Architecture (Q7/Q8)
@@ -141,26 +141,39 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    sort/window resolution, lease store, error classification). Glaze ships with **no**
    client id (`--dart-define`, default empty) and DataCat must approve an integration id,
    so this path cannot be exercised here; nothing in the UI depends on it.
-6. **M6 — extras**: batch queue, favorites, JannyAI decision (measured 2026-11-23, below), polish.
-   **JannyAI, measured (2026-11-23):** search is portable, the *definition* is not.
-   - `POST https://search.jannyai.com/multi-search` with `Authorization: Bearer <64-hex fallback
-     token>` (hardcoded fallback still accepted) → 200. Body shape and headers ported from Glaze
-     are correct as documented in `glaze-sources-survey.md` §3.
-   - Index `janny-characters` **does not carry the definition**. A hit has exactly:
-     `avatar, createdAt, createdAtStamp, description (blurb HTML), id, isLowQuality, isNsfw,
-     name, permanentToken (a number, 91), tagIds, totalToken` — no `personality`, `scenario`,
-     `firstMessage`, `exampleDialogs`, `creatorUsername`.
-   - `GET /indexes/janny-characters/documents/<id>` → 403 `invalid_api_key` (document route needs
-     an admin key, the search token cannot read documents).
-   - `GET https://jannyai.com/characters/<id>` from Node → 403 with `cf-mitigated: challenge`
-     (Cloudflare managed challenge). So detail scraping is impossible server-side, exactly as the
-     survey warned.
-   Consequence: a search-only provider can browse and resolve names/avatars/tokens, but cannot
-   build an importable card — the definition only exists behind the challenge. Options: drop
-   JannyAI in v1 (the roadmap's stated fallback), or implement it in v2 through the Electron
-   webview together with JanitorAI. A third option exists only if the site's own client exposes a
-   JSON endpoint for character detail, which one DevTools capture would settle.
-7. **v2 (separate effort)**: JanitorAI + Janny-detail via Electron webview.
+6. **M6 — extras**: batch queue, favorites, JannyAI (implemented 2026-11-23), polish.
+   **JannyAI** (`src/endpoints/weavers-vault-janny*.js`, routes `/api/weavers-vault/janny/*`).
+   *Corrected 2026-11-23:* an earlier note here concluded detail scraping was impossible because
+   `GET https://jannyai.com/characters/<id>` from Node answers `403 cf-mitigated: challenge`. That
+   conclusion was wrong — it described our HTTP client, not the site. Glaze never uses HTTP for
+   those pages; it uses a WebView (`janny_webview_proxy.dart`), and the same approach works for us.
+   Measured facts:
+   - **Search is plain HTTP.** `POST https://search.jannyai.com/multi-search` with
+     `Authorization: Bearer <64-hex>` (settings value, else the public fallback) → 200. Index
+     `janny-characters`, hits carry `avatar, createdAt, createdAtStamp, description (blurb HTML),
+     id, isLowQuality, isNsfw, name, permanentToken, tagIds, totalToken` — no definition.
+     `GET /indexes/janny-characters/documents/<id>` stays 403 `invalid_api_key`.
+   - **Detail needs a real browser.** Cloudflare's managed challenge binds `cf_clearance` to the
+     TLS fingerprint that solved it, so cookies replayed from Node never work. A real Chromium
+     clears it by loading `https://jannyai.com/`, and a `fetch()` executed *inside that page*
+     shares the fingerprint and cookie jar, so it returns 200. Measured: **headless Chrome is
+     rejected (clearance cookie issued, interstitial persists); headful Chrome with a persistent
+     profile passes.** Hence the offscreen window in `weavers-vault-janny-browser.js`.
+   - The page embeds the character in an `astro-island` (`component-export="CharacterButtons"`)
+     `props` attribute as Astro's `[type, data]` tuples: `personality` (the prompt body — becomes
+     ST's `description`), `scenario`, `firstMessage`, `exampleDialogs`, `description` (the public
+     blurb — becomes `creator_notes`), `tags` (real names), `creatorName`, `avatar`.
+   - **The avatar CDN serves WebP** whatever `Accept` says, and it sends no CORS headers, so the
+     bytes come from Node and are transcoded to PNG by the warm browser's canvas via a `data:` URL
+     (untainted), capped at 768 px.
+   - Measured round trip: cold start ≈ 42 s (launch + challenge), then 2.7 s warm, 0.7 s once the
+     page session is hot; the session parks on the origin and is torn down after 60 s idle.
+   - Import writes the card through `importCharacter` only — the PNG the server builds already
+     carries `vault_source: 'janny'`, so nothing is stamped afterwards (see PITFALLS #1).
+   Verified on the real UI (sandbox server, 2026-11-23): provider row → search → detail (author,
+   tabs, prompt blocks) → import; the stored PNG decoded back at `description` 5276 chars,
+   `first_mes` 1651 chars, `vault_source: janny`.
+7. **v2 (separate effort)**: JanitorAI via Electron webview.
 
 ## Attribution & legal
 

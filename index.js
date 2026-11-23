@@ -19,6 +19,7 @@ import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldIn
 const IMG_CHUB = new URL('chub.png', import.meta.url).href;
 const IMG_SAUCEPAN = new URL('saucepan.svg', import.meta.url).href;
 const IMG_DATACAT = new URL('datacat.png', import.meta.url).href;
+const IMG_JANNY = new URL('janny.svg', import.meta.url).href;
 
 // Window-chrome glyphs, drawn inline to match Glaze's Material icons
 // (`Icons.crop_square_rounded` / `Icons.fullscreen_exit_rounded`) instead of
@@ -32,7 +33,12 @@ const SOURCE_META = {
     chub: { label: 'Chub', img: IMG_CHUB },
     saucepan: { label: 'Saucepan', img: IMG_SAUCEPAN },
     datacat: { label: 'DataCat', img: IMG_DATACAT },
+    janny: { label: 'JannyAI', img: IMG_JANNY },
 };
+
+// JannyAI cards arrive already built by the server (it drives a real browser
+// through the site's Cloudflare challenge); keyed by character id.
+const jannyFiles = new Map();
 
 // Extracted Saucepan cards by companionId — the detail FAB import consumes these.
 const saucepanFiles = new Map();
@@ -120,6 +126,15 @@ const DATACAT_SORTS = {
     score_24h: { label: 'Top rated 24 hours', icon: 'fa-solid fa-fire' },
     chat_count: { label: 'Most chats', icon: 'fa-solid fa-comments' },
     messages_per_chat: { label: 'Deepest chats', icon: 'fa-solid fa-comment-dots' },
+};
+
+// JannyAI searches its own Meilisearch index, whose sort vocabulary is this.
+const JANNY_SORTS = {
+    newest: { label: 'Newest', icon: 'fa-solid fa-clock' },
+    oldest: { label: 'Oldest', icon: 'fa-solid fa-clock-rotate-left' },
+    tokens_desc: { label: 'Most tokens', icon: 'fa-solid fa-arrow-trend-up' },
+    tokens_asc: { label: 'Fewest tokens', icon: 'fa-solid fa-arrow-down-wide-short' },
+    relevant: { label: 'Most relevant', icon: 'fa-solid fa-magnifying-glass' },
 };
 
 const SORT_LABELS = {
@@ -379,6 +394,22 @@ function activeFilterCount() {
  */
 function searchRequest() {
     const f = state.filters ?? { ...committedFilters(), tags: new Set() };
+    if (state.source === 'janny') {
+        // The index pages by number and carries no tags of its own (its hits
+        // expose ids only), so only the token bound and NSFW flag travel.
+        return {
+            url: '/api/weavers-vault/janny/search',
+            source: 'JannyAI',
+            body: {
+                query: state.query,
+                page: state.page,
+                nsfw: f.nsfw,
+                minTokens: f.minTokens,
+                maxTokens: f.maxTokens,
+                sort: state.sort,
+            },
+        };
+    }
     if (state.source === 'datacat') {
         const perPage = settings().perPage || 24;
         return {
@@ -548,7 +579,9 @@ function renderGrid() {
         const name = card.querySelector('.wv-card-name');
         name.textContent = item.name;
         name.title = item.name;
-        card.querySelector('.wv-creator').textContent = `@${item.creator}`;
+        // JannyAI's search index carries no creator, so an empty value must not
+        // render as a bare "@".
+        card.querySelector('.wv-creator').textContent = item.creator ? `@${item.creator}` : '';
         card.querySelector('.wv-tokens').textContent = item.tokens ? `${fmtCount(item.tokens)} tokens` : '';
         card.querySelector('.wv-syn').textContent = item.description || '';
         // M3: detail popup on click.
@@ -607,15 +640,21 @@ function hydrateControls() {
     const sortIcon = root.querySelector('.wv-sorticon');
     const icon = state.source === 'datacat'
         ? (DATACAT_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')  // reserved for the optional REST adapter
-        : (SORT_ICONS[state.sort] ?? 'fa-solid fa-sort');
+        : state.source === 'janny'
+            ? (JANNY_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')
+            : (SORT_ICONS[state.sort] ?? 'fa-solid fa-sort');
     sortIcon.className = `${icon} wv-sorticon`;
     renderSortMenu();
 }
 
 function sortTable() {
-    return state.source === 'datacat'
-        ? Object.fromEntries(Object.entries(DATACAT_SORTS).map(([k, v]) => [k, v.label]))
-        : SORT_LABELS;
+    if (state.source === 'datacat') {
+        return Object.fromEntries(Object.entries(DATACAT_SORTS).map(([k, v]) => [k, v.label]));
+    }
+    if (state.source === 'janny') {
+        return Object.fromEntries(Object.entries(JANNY_SORTS).map(([k, v]) => [k, v.label]));
+    }
+    return SORT_LABELS;
 }
 
 function renderSortMenu() {
@@ -773,8 +812,16 @@ function openFilterSheet() {
     state.tagSuggestions = [];
     root.querySelector('.wv-tagfilter').value = '';
     root.querySelector('.wv-tagclear').hidden = true;
+    // Tags are chub topics and the "Other" switches are chub flags; JannyAI's
+    // index exposes neither, so showing them would promise filtering that
+    // cannot happen. Only the token bound and NSFW flag apply there.
+    const chubOnly = state.source !== 'janny';
+    const tagCard = root.querySelector('.wv-tagshead')?.closest('.wv-mcard');
+    if (tagCard) tagCard.hidden = !chubOnly;
+    const otherCard = root.querySelector('.wv-mintags')?.closest('.wv-mcard');
+    if (otherCard) otherCard.hidden = !chubOnly;
     overlay.hidden = false;
-    ensureTagCloud();
+    if (chubOnly) ensureTagCloud();
     renderTagPicker();
 }
 
@@ -1024,7 +1071,7 @@ async function openDetail(item, preloaded = null) {
             </div>
             <div class="wv-dloading">
                 <span class="wv-spinner"></span>
-                <div class="wv-dphase">Loading character…</div>
+                <div class="wv-dphase">${item.source === 'janny' ? 'Opening JannyAI in a browser session…' : 'Loading character…'}</div>
             </div>
         </div>`;
     wireWinChrome(popup, () => { popup.hidden = true; });
@@ -1036,6 +1083,21 @@ async function openDetail(item, preloaded = null) {
         return;
     }
     try {
+        if (item.source === 'janny') {
+            // The server reads the page inside a real browser (Cloudflare) and
+            // hands back a finished, provenance-stamped card PNG.
+            const r = await fetch('/api/weavers-vault/janny/card', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ id: item.fullPath, name: item.name }),
+                signal: detailAbort.signal,
+            });
+            const payload = await r.json();
+            if (!r.ok) throw new Error(payload?.error || `JannyAI answered ${r.status}`);
+            jannyFiles.set(item.fullPath, payload.file);
+            renderDetail(popup, item, payload.character);
+            return;
+        }
         const r = await fetch(`/api/weavers-vault/chub/character?fullPath=${encodeURIComponent(item.fullPath)}`,
             { headers: getRequestHeaders(), signal: detailAbort.signal });
         const body = await r.json();
@@ -1053,7 +1115,7 @@ async function openDetail(item, preloaded = null) {
                 </div>
                 <div class="wv-derror">
                     <span class="fa-solid fa-triangle-exclamation wv-derricon"></span>
-                    <div class="wv-derrmsg">${item.source === 'datacat' ? 'DataCat' : 'chub.ai'} failed — ${escapeHtml(error.message)}</div>
+                    <div class="wv-derrmsg">${item.source === 'datacat' ? 'DataCat' : item.source === 'janny' ? 'JannyAI' : 'chub.ai'} failed — ${escapeHtml(error.message)}</div>
                     <button class="wv-dretry" data-fullpath="${escapeHtml(item.fullPath)}">Try again</button>
                 </div>
             </div>`;
@@ -1116,8 +1178,12 @@ function renderDetail(popup, item, character) {
                                 ? 'https://saucepan.ai/companion/' + encodeURIComponent(item.fullPath ?? '')
                                 : item.source === 'datacat'
                                     ? 'https://datacat.run/creators/' + encodeURIComponent(item.creatorId || d.creator)
-                                    : 'https://chub.ai/' + escapeHtml((item.fullPath || '').split('/')[0])}" target="_blank" rel="noopener noreferrer">@${escapeHtml(d.creator)}</a>`
-                            : (item.source === 'saucepan' ? '' : `<span class="wv-heroauthor">@${escapeHtml((item.fullPath || '').split('/')[0])}</span>`)}
+                                    : item.source === 'janny'
+                                        ? 'https://jannyai.com/creators/' + encodeURIComponent(d.creator)
+                                        : 'https://chub.ai/' + escapeHtml((item.fullPath || '').split('/')[0])}" target="_blank" rel="noopener noreferrer">@${escapeHtml(d.creator)}</a>`
+                            : (item.source === 'saucepan' || item.source === 'janny'
+                                ? ''
+                                : `<span class="wv-heroauthor">@${escapeHtml((item.fullPath || '').split('/')[0])}</span>`)}
                     </div>
                 </div>
                 <div class="wv-dtabs" data-active="0">
@@ -1236,6 +1302,8 @@ function renderDetail(popup, item, character) {
                 window.open(`https://saucepan.ai/companion/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             } else if (item.source === 'datacat') {
                 window.open(`https://datacat.run/characters/${encodeURIComponent(item.id)}`, '_blank', 'noopener');
+            } else if (item.source === 'janny') {
+                window.open(`https://jannyai.com/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             } else {
                 window.open(`https://chub.ai/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             }
@@ -1249,6 +1317,7 @@ function renderDetail(popup, item, character) {
     // Import FAB → mode sheet when lorebooks exist, straight import otherwise.
     popup.querySelector('.wv-dfab').addEventListener('click', () => {
         if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
+        if (item.source === 'janny') { importJannyCharacter(item, character); return; }
         if (book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
@@ -1308,7 +1377,9 @@ function ledgerAdd(item, what) {
         at: Date.now(),
         url: source === 'saucepan'
             ? `https://saucepan.ai/companion/${item.fullPath}`
-            : `https://chub.ai/characters/${item.fullPath}`,
+            : source === 'janny'
+                ? `https://jannyai.com/characters/${item.fullPath}`
+                : `https://chub.ai/characters/${item.fullPath}`,
     });
     saveSettingsQuiet();
 }
@@ -1387,9 +1458,11 @@ function setSource(source) {
         commitFilters();
         // Sorts are a per-provider vocabulary: keep the key only when the new
         // source knows it, else fall back to that source's default order.
-        const known = source === 'datacat' ? DATACAT_SORTS : SORT_LABELS;
+        const known = source === 'datacat' ? DATACAT_SORTS
+            : source === 'janny' ? JANNY_SORTS
+                : SORT_LABELS;
         if (!known[state.sort]) {
-            state.sort = source === 'datacat' ? 'fresh' : 'popular';
+            state.sort = source === 'datacat' ? 'fresh' : source === 'janny' ? 'newest' : 'popular';
             settings().sort = state.sort;
             saveSettingsQuiet();
         }
@@ -2117,6 +2190,54 @@ async function importSaucepanCharacter(item, character) {
         await getCharacters();
         const target = importedAvatar ? characters.find(c => c.avatar === importedAvatar) : null;
         if (!target) {
+            console.warn(`[${extensionName}] imported but could not locate character in the library list`);
+        }
+        ledgerAdd(item, 'character');
+        toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
+    } catch (error) {
+        console.error(`[${extensionName}] import failed`, error);
+        toastr.error(error.message, "Weaver's Vault import failed");
+    }
+}
+
+/**
+ * JannyAI import. The PNG handed over by `/janny/card` already carries the vault
+ * provenance (vault_source/vault_url/vault_full_path) inside its chara chunk, so
+ * there is nothing to stamp afterwards — and stamping is exactly where imports
+ * used to get blanked, so not touching the card again is the safer path.
+ */
+async function importJannyCharacter(item, character) {
+    let cardFile = jannyFiles.get(item.fullPath);
+    if (!cardFile) {
+        // Detail was opened before a reload, or the cache was cleared: rebuild it
+        // from the same route rather than failing.
+        try {
+            const r = await fetch('/api/weavers-vault/janny/card', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ id: item.fullPath, name: item.name }),
+            });
+            const payload = await r.json();
+            if (!r.ok) throw new Error(payload?.error || `JannyAI answered ${r.status}`);
+            cardFile = payload.file;
+            jannyFiles.set(item.fullPath, cardFile);
+            character = payload.character;
+        } catch (error) {
+            toastr.error(error.message, "Weaver's Vault import failed");
+            return;
+        }
+    }
+    const dup = ledgerCheck(item);
+    if (dup) {
+        toastr.warning(`Imported before (${new Date(dup.at).toLocaleString()}) — importing again creates a duplicate.`, "Weaver's Vault");
+    }
+    toastr.info('Importing character…', "Weaver's Vault");
+    try {
+        const bytes = Uint8Array.from(atob(cardFile.buffer), c => c.charCodeAt(0));
+        const file = new File([bytes], cardFile.fileName, { type: cardFile.fileType });
+        const importedAvatar = await importCharacter(file, { importTags: false });
+        await getCharacters();
+        if (!importedAvatar || !characters.find(c => c.avatar === importedAvatar)) {
             console.warn(`[${extensionName}] imported but could not locate character in the library list`);
         }
         ledgerAdd(item, 'character');

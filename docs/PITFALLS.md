@@ -116,3 +116,54 @@ debugger to the tab and does not receive that frame's network events.
 the site's own buttons/Download path appear) or use Chrome DevTools → Network on the
 Loreweaver tab. Absence of those requests in a tab recording is a tool limitation, not
 evidence that they did not happen.
+
+---
+
+## 5. "The site blocks HTTP, so the data is unreachable" — a 403 describes the client, not the site
+
+**Symptom.** JannyAI character pages answer `403 cf-mitigated: challenge` from Node. The
+conclusion recorded in DESIGN.md was "detail scraping is impossible; the definition only
+exists behind the challenge", and the provider was queued for dropping.
+
+**Why that was wrong.** The site is not unreadable — *our HTTP client* is. Cloudflare's
+managed challenge solves once, in a real browser, and binds the resulting `cf_clearance`
+cookie to the TLS/JA3 fingerprint of whoever solved it. Cookies copied into Node
+therefore still fail. Glaze's own implementation never used HTTP for these pages: it
+opens a WebView, lets it solve the challenge, and then runs `fetch()` **inside that
+page** so the request inherits the fingerprint and cookie jar.
+
+**Measured, 2026-11-23 (same machine, same minute):**
+- headless Chrome: `cf_clearance` cookie is issued, interstitial persists, in-page fetch
+  still `403`, `challenged: true`.
+- headful Chrome with a persistent profile: challenge clears, in-page fetch `200`,
+  100 951 bytes, Astro `props` parse yields `personality` 8353 / `firstMessage` 1181.
+- Detail round trip: ~42 s cold (browser launch + challenge), 2.7 s warm, 0.7 s hot.
+
+**Rules.**
+1. Before declaring a source unreachable, reproduce the client that *does* reach it
+   (here: the reference app's WebView). A 403 is evidence about the requester.
+2. Check *where* the fetch runs. The same URL can be blocked from Node, blocked from an
+   in-page `fetch` (no CORS on the CDN), and fine from a `data:`-URL image decode. We
+   fetch CDN bytes in Node and transcode them in the browser canvas for exactly this
+   reason.
+3. Headless and headful browsers are different clients to a bot filter. Do not assume a
+   headless pass implies the headful path works, or vice versa.
+4. When a previous conclusion is overturned by measurement, rewrite the DESIGN.md entry
+   with the measurement that overturned it — do not silently delete the old claim.
+
+---
+
+## 6. A new source must satisfy the item contract the grid already expects
+
+**Symptom.** JannyAI cards appeared in the grid, but clicking one opened the detail window
+and immediately showed "JannyAI failed — A JannyAI character id is required."
+
+**Cause.** `normalizeJannyHit` returned `id`, while every existing source and every
+consumer (detail fetch, kebab "open source site", import ledger, `ledgerCheck`) keys items
+by `fullPath`. The click passed `undefined` to the server.
+
+**Rule.** Before wiring a new provider, read the *renders* (grid card, detail, ledger) and
+list the fields they touch — not just the search route's response. Here the grid needed
+`name, avatarUrl, tokens, description, tags, creator, nsfw`, and the click paths needed
+`fullPath` and `source`. A provider that only matches the search response shape will
+render and then fail on the first interaction.

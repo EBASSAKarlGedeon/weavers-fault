@@ -92,6 +92,24 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    same reason). While browsing, the panel hides the grid's furniture; this also exposed
    that row rules outrank the UA `[hidden]` rule, now root-fixed with
    `#wv-root [hidden] { display: none !important }`.
+   **Name-only card root cause (three-subagent line-by-line audit, 2026-11-23)**: some
+   "Open in SillyTavern" imports arrive as name-only cards (description empty). Verified
+   NOT a bug in our parent: the site's own bridge script (`st-bridge-v14`) calls
+   `api.buildPngPayload(id, name, creator, variant, sourceKind)` with exactly 5 args —
+   no options object, `definitionSource` never mentioned anywhere in the bridge — so the
+   download request goes out as `/api/characters/<id>/download?...&downloadFormat=png`
+   **without** the `definitionSource` param (`tt('') === ''` → param omitted). The site's
+   own Download button instead sends `definitionSource=source` (or `reimagination`),
+   which makes the backend fetch the full original definition; the default (omitted)
+   path serves the *stored mirrored* definition, and for janitor-mirrored characters
+   whose logged-in retrieval never completed (`retrieval_completeness.state ∈
+   {public_only_partial, anonymous_public, ...}`, per the site's own classifier) that
+   stored definition has empty description/first_mes. The site's normalizer (`ZO`/`W`)
+   validates nothing, so the empty card flows into the PNG silently. Protocol levers
+   available to a third-party parent (iframe URL params, init, acks): **none** — the
+   bridge drops even the `definitionSource` field `getCurrentModalContext()` already
+   returns. Our empty-card guard therefore stays and its error message names this cause
+   plus the working workaround (Download button → drop the PNG into Loreweaver's import).
    Kept as an optional path: `src/endpoints/weavers-vault-datacat.js` +
    `weavers-vault-datacat-routes.js` port Glaze's `api/client/v1` adapter (40 jest tests:
    installation-id body contract, device-flow bodies, two-window `/fresh` query shaping,

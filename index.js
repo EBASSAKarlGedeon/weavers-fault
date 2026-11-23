@@ -1849,7 +1849,7 @@ async function importDatacatBridgeCard(payload) {
         const name = String(metadata.characterName || metadata.name || 'datacat-character').trim();
         const texts = datacatCardTextLengths(card.cardText);
         if (texts && texts.total < 16) {
-            throw new Error(`DataCat sent a name-only card for "${name}" — its "Open in SillyTavern" button requests the card without the definitionSource hint, so DataCat answers with its summary. Press Download on the character page in DataCat first, then click Open in SillyTavern again: the definition is then cached and the card arrives with its text.`);
+            throw new Error(`DataCat sent a name-only card for "${name}". Audited cause (datacat.run's own code): its "Open in SillyTavern" bridge builds the card without the definitionSource hint, so DataCat serves its stored summary — for characters whose retrieval never completed that summary has no description. Workaround that works: press Download on the character page in DataCat and drop the downloaded PNG into Loreweaver's character import instead; that PNG carries the full text.`);
         }
         // Same contract the official extension posts: the PNG as `avatar`, an
         // explicit `file_type`, a stable `preserved_name`, and the provenance

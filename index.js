@@ -1838,18 +1838,25 @@ async function importDatacatBridgeCard(payload) {
         if (!card.cardKind || card.cardBytes < 64) {
             throw new Error(`DataCat sent artwork only — no card data in the PNG (chunks: ${card.chunks.join(', ') || 'none'}).`);
         }
-        // Root cause (verified against datacat.run's bridge, st-bridge-v14):
-        // resolveButtonContext() returns only 5 fields and buildPngPayload() is
-        // called without options, so the Open-in-SillyTavern request omits
-        // `definitionSource`. The site's own Download button sends
-        // `definitionSource=source`, which makes the backend fetch the real
-        // definition from the source; without it the backend answers from its
-        // cached summary (name, creator, artwork — no text). Downloading once
-        // warms that cache, after which this bridge gets the full card.
+        // Evidence check (2026-11-23), official extension captured in DevTools
+        // plus datacat.run's own traffic recorded through chrome-network-mcp:
+        //   - Open-in-SillyTavern path: GET /api/characters/<id>/download
+        //       ?t=…&downloadFormat=png&variant=janitor_core&sourceKind=janitor
+        //     — no `definitionSource` — and the official extension still got a
+        //     FULL card (Lena: description ~7.4k, first_mes, 9 tags), then
+        //     POST /api/characters/import → 200.
+        //   - Site Download button: the same endpoint with
+        //     `&definitionSource=source` → FULL card as well (Hana: 7,061).
+        // So a missing `definitionSource` does NOT by itself yield a name-only
+        // card; the earlier hypothesis that it did is RETRACTED. DataCat
+        // sometimes answers with an empty definition (its mirrored retrieval
+        // for that character has not completed). The official extension imports
+        // that blank card silently; we refuse it rather than creating a blank
+        // character.
         const name = String(metadata.characterName || metadata.name || 'datacat-character').trim();
         const texts = datacatCardTextLengths(card.cardText);
         if (texts && texts.total < 16) {
-            throw new Error(`DataCat sent a name-only card for "${name}". Audited cause (datacat.run's own code): its "Open in SillyTavern" bridge builds the card without the definitionSource hint, so DataCat serves its stored summary — for characters whose retrieval never completed that summary has no description. Workaround that works: press Download on the character page in DataCat and drop the downloaded PNG into Loreweaver's character import instead; that PNG carries the full text.`);
+            throw new Error(`DataCat answered with a card that has no text for "${name}" — its stored definition for this character is empty, so the PNG carries only the name and the artwork. Open the character on datacat.run (or in the DataCat panel), press Download to pull the full definition, then import that PNG. This is DataCat-side retrieval state, not something the vault changes.`);
         }
         // Same contract the official extension posts: the PNG as `avatar`, an
         // explicit `file_type`, a stable `preserved_name`, and the provenance

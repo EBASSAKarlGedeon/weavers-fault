@@ -92,24 +92,32 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
    same reason). While browsing, the panel hides the grid's furniture; this also exposed
    that row rules outrank the UA `[hidden]` rule, now root-fixed with
    `#wv-root [hidden] { display: none !important }`.
-   **Name-only card root cause (three-subagent line-by-line audit, 2026-11-23)**: some
-   "Open in SillyTavern" imports arrive as name-only cards (description empty). Verified
-   NOT a bug in our parent: the site's own bridge script (`st-bridge-v14`) calls
-   `api.buildPngPayload(id, name, creator, variant, sourceKind)` with exactly 5 args —
-   no options object, `definitionSource` never mentioned anywhere in the bridge — so the
-   download request goes out as `/api/characters/<id>/download?...&downloadFormat=png`
-   **without** the `definitionSource` param (`tt('') === ''` → param omitted). The site's
-   own Download button instead sends `definitionSource=source` (or `reimagination`),
-   which makes the backend fetch the full original definition; the default (omitted)
-   path serves the *stored mirrored* definition, and for janitor-mirrored characters
-   whose logged-in retrieval never completed (`retrieval_completeness.state ∈
-   {public_only_partial, anonymous_public, ...}`, per the site's own classifier) that
-   stored definition has empty description/first_mes. The site's normalizer (`ZO`/`W`)
-   validates nothing, so the empty card flows into the PNG silently. Protocol levers
-   available to a third-party parent (iframe URL params, init, acks): **none** — the
-   bridge drops even the `definitionSource` field `getCurrentModalContext()` already
-   returns. Our empty-card guard therefore stays and its error message names this cause
-   plus the working workaround (Download button → drop the PNG into Loreweaver's import).
+   **Name-only cards (investigated 2026-11-23; measured, not inferred)**: some imports
+   arrive with the name and artwork but no description. Measured evidence:
+   - Static reading of the site's bridge (`st-bridge-v14`) and the three-subagent audit:
+     the bridge calls `api.buildPngPayload(id, name, creator, variant, sourceKind)` with
+     exactly 5 args and never mentions `definitionSource`, so the Open-in-SillyTavern
+     download request omits that param. Verified live in DevTools on the **official
+     extension**: `GET /api/characters/70031113…/download?t=…&downloadFormat=png&
+     variant=janitor_core&sourceKind=janitor` → **200 with a FULL card** (Lena,
+     description ~7.4k, first_mes, 9 tags) → then `POST /api/characters/import` → 200.
+   - Recorded with chrome-network-mcp on a standalone datacat.run tab: the site's own
+     **Download** button sends `&definitionSource=source` and also gets a full card
+     (Hana, description 7,061).
+   - Therefore **a missing `definitionSource` does NOT by itself produce a name-only
+     card**. The earlier hypothesis that it did (commit `e4f9aa7`) is **retracted**: the
+     official extension omits the param and still receives full cards.
+   What survives: DataCat can answer with an empty definition for a character whose
+   mirrored retrieval has not completed (the site's own `public_only_partial` state), and
+   the site normalizes/embeds it without validation. No protocol lever exists for a
+   third-party parent (iframe URL params, init and acks cannot change the card).
+   On *our* side the remaining unknown is whether the vault's own import path is still
+   affected: every vault-stamped DataCat import on disk (3, all 11-23 01:55–02:22) is
+   empty, and all of them predate a browser reload after the `e702868` contract fixes, so
+   none of them exercises the current code. That clean test still has to be run. The
+   empty-card guard stays either way — it refuses to create a blank character and its
+   message now states only what is measured (empty definition on DataCat's side) plus the
+   workaround (press Download, import that PNG).
    Kept as an optional path: `src/endpoints/weavers-vault-datacat.js` +
    `weavers-vault-datacat-routes.js` port Glaze's `api/client/v1` adapter (40 jest tests:
    installation-id body contract, device-flow bodies, two-window `/fresh` query shaping,

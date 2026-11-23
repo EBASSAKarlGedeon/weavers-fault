@@ -1532,6 +1532,71 @@ function datacatRequestId(value) {
     return DC_REQUEST_ID.test(id) ? id : '';
 }
 
+/**
+ * Reads the PNG's tEXt/zTXt/iTXt chunks looking for the character card payload
+ * (`chara` = V2, `ccv3` = V3). An image-only PNG from a provider is a silent
+ * trap: SillyTavern happily creates a character whose every field is empty, so
+ * the import has to refuse it and say why.
+ */
+function readPngCardPayload(payload) {
+    const bytes = new Uint8Array(payload);
+    const view = new DataView(payload);
+    const chunks = [];
+    let cardKind = '';
+    let cardBytes = 0;
+    let cardText = '';
+    let offset = 8;
+    while (offset + 8 <= bytes.length) {
+        const length = view.getUint32(offset);
+        const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+        chunks.push(type);
+        const start = offset + 8;
+        if (!cardKind && (type === 'tEXt' || type === 'zTXt' || type === 'iTXt')) {
+            const data = bytes.subarray(start, start + length);
+            const nul = data.indexOf(0);
+            if (nul > 0) {
+                const keyword = String.fromCharCode(...data.subarray(0, nul));
+                if (keyword === 'chara' || keyword === 'ccv3') {
+                    cardKind = keyword;
+                    cardBytes = data.length - nul - 1;
+                    // tEXt payloads are plain base64; compressed variants are
+                    // left to the empty-card heuristic (it just skips).
+                    if (type === 'tEXt') {
+                        try {
+                            cardText = atob(String.fromCharCode(...data.subarray(nul + 1)));
+                        } catch {
+                            cardText = '';
+                        }
+                    }
+                }
+            }
+        }
+        if (type === 'IEND') break;
+        offset = start + length + 4;
+    }
+    return { chunks, cardKind, cardBytes, cardText };
+}
+
+/**
+ * Character text length from a decoded V2/V3 card. Used to catch DataCat's
+ * name-only cards before they become blank characters in the library.
+ */
+function datacatCardTextLengths(raw) {
+    if (!raw) return null;
+    try {
+        const card = JSON.parse(raw);
+        const data = card?.data ?? card ?? {};
+        const fields = ['description', 'first_mes', 'mes_example', 'scenario', 'personality', 'system_prompt'];
+        let total = 0;
+        for (const field of fields) total += String(data[field] ?? '').length;
+        total += (Array.isArray(data.alternate_greetings) ? data.alternate_greetings : [])
+            .reduce((sum, greeting) => sum + String(greeting ?? '').length, 0);
+        return { total, cardName: String(data.name ?? card?.name ?? '') };
+    } catch {
+        return null;
+    }
+}
+
 function validateDatacatPng(payload) {
     const isBuffer = payload instanceof ArrayBuffer;
     if (!isBuffer) throw new Error('DataCat PNG payload is invalid.');
@@ -1645,7 +1710,24 @@ async function importDatacatBridgeCard(payload) {
     datacatBridge.active.add(id);
     try {
         const png = validateDatacatPng(payload.png);
+        const card = readPngCardPayload(png);
+        // Kept for live diagnosis: what the site actually sent, without guessing.
+        window.__wvDatacatLastCard = {
+            name: metadata.characterName, bytes: png.byteLength,
+            chunks: card.chunks, cardKind: card.cardKind, cardBytes: card.cardBytes,
+            at: new Date().toISOString(),
+        };
+        if (!card.cardKind || card.cardBytes < 64) {
+            throw new Error(`DataCat sent artwork only — no card data in the PNG (chunks: ${card.chunks.join(', ') || 'none'}).`);
+        }
+        // DataCat emits a name-only card when it cannot pull the source
+        // definition (janitor-sourced characters, seen 2026-11-23). Importing
+        // that creates a character with every field empty, so refuse instead.
         const name = String(metadata.characterName || metadata.name || 'datacat-character').trim();
+        const texts = datacatCardTextLengths(card.cardText);
+        if (texts && texts.total < 16) {
+            throw new Error(`DataCat built an empty card for "${name}" — its export returned no character text (source: ${metadata.sourceKind || 'unknown'}). That is DataCat's card, not a Loreweaver import problem.`);
+        }
         const file = new File([png], `${name.replace(/[\\/:*?"<>|]/g, '_')}.png`, { type: 'image/png' });
 
         postDatacatAck(requestId, 'processing', 'Importing into Loreweaver…', {

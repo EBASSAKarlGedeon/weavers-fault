@@ -1838,14 +1838,18 @@ async function importDatacatBridgeCard(payload) {
         if (!card.cardKind || card.cardBytes < 64) {
             throw new Error(`DataCat sent artwork only — no card data in the PNG (chunks: ${card.chunks.join(', ') || 'none'}).`);
         }
-        // DataCat builds a name-only card when its export cannot reach the
-        // source definition — most often because its own Turnstile check inside
-        // the frame was not completed. Importing that creates a character whose
-        // every field is empty, so refuse and point at the real cause.
+        // Root cause (verified against datacat.run's bridge, st-bridge-v14):
+        // resolveButtonContext() returns only 5 fields and buildPngPayload() is
+        // called without options, so the Open-in-SillyTavern request omits
+        // `definitionSource`. The site's own Download button sends
+        // `definitionSource=source`, which makes the backend fetch the real
+        // definition from the source; without it the backend answers from its
+        // cached summary (name, creator, artwork — no text). Downloading once
+        // warms that cache, after which this bridge gets the full card.
         const name = String(metadata.characterName || metadata.name || 'datacat-character').trim();
         const texts = datacatCardTextLengths(card.cardText);
         if (texts && texts.total < 16) {
-            throw new Error(`DataCat returned a card with no character text for "${name}". Its export needs DataCat's verification step (the captcha shown inside DataCat): complete it there and try again — without it DataCat sends the name only.`);
+            throw new Error(`DataCat sent a name-only card for "${name}" — its "Open in SillyTavern" button requests the card without the definitionSource hint, so DataCat answers with its summary. Press Download on the character page in DataCat first, then click Open in SillyTavern again: the definition is then cached and the card arrives with its text.`);
         }
         // Same contract the official extension posts: the PNG as `avatar`, an
         // explicit `file_type`, a stable `preserved_name`, and the provenance

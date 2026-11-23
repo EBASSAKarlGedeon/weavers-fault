@@ -167,7 +167,7 @@ systems (characters list, worldbooks). No duplicate library DB. Name: **Weaver's
      bytes come from Node and are transcoded to PNG by the warm browser's canvas via a `data:` URL
      (untainted), capped at 768 px.
    - Measured round trip: cold start ≈ 42 s (launch + challenge), then 2.7 s warm, 0.7 s once the
-     page session is hot; the session parks on the origin and is torn down after 60 s idle.
+     page session is hot; the session parks on the origin and is torn down after 30 s idle.
    - Import writes the card through `importCharacter` only — the PNG the server builds already
      carries `vault_source: 'janny'`, so nothing is stamped afterwards (see PITFALLS #1).
    Verified on the real UI (sandbox server, 2026-11-23): provider row → search → detail (author,

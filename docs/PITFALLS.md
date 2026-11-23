@@ -193,6 +193,19 @@ render and then fail on the first interaction.
    identically and looks like a permanent outage.
 4. Never conclude "the site is broken" from a timeout you imposed.
 
+**The wedge that actually hit the live server** (found after the fixes above): a launch that
+exits **0** without ever writing `DevToolsActivePort` means Chrome handed the URL to an already
+running instance of the same profile and quit. A leftover browser from an earlier run owns the
+profile, and the stale-lock cleanup had already deleted the port file that would have allowed
+adopting it — so every later request failed the same way, and it read as "Cloudflare never
+clears". Two things were needed:
+- reclaim the profile (kill only processes whose command line contains that profile folder),
+  because the profile is exclusive to this feature;
+- normalise `--user-data-dir` to an **absolute** path first. The server passed a relative one,
+  so Chrome's own command line was relative and an absolute-path match found nothing — the
+  reclaim ran, matched zero processes, and the wedge survived. Match on the profile folder's
+  **basename**, and pass an absolute path.
+
 ---
 
 ## 8. The index's totals are capped, so "of 4000 results" is a lie
@@ -232,3 +245,22 @@ mapping added `'SFW'` to `tags` while the grid already derives a chip from `item
    (`?query=a`), so the home page is the primary catalogue URL.
 4. Selection is stored as names (uniform with chub) and resolved to numeric ids server-side
    through that cache, so a saved selection survives a reload.
+
+---
+
+## 10. Hiding the automation window from the taskbar must not hide the window
+
+**Symptom.** Every JannyAI session added a Chrome button to the taskbar (and to Alt-Tab) that the
+user could not meaningfully enter — the window is parked offscreen, which is deliberate.
+
+**Cause.** An offscreen window is still a normal visible window: the shell gives it a taskbar
+button unless its extended style says otherwise. Chrome also sets `WS_EX_APPWINDOW`, which forces
+a button even for windows that would normally not get one.
+
+**Rule.** Mark the browser's top-level windows as tool windows —
+`WS_EX_TOOLWINDOW (0x80)` on, `WS_EX_APPWINDOW (0x40000)` off, then
+`SetWindowPos(..., SWP_FRAMECHANGED)` — never `SW_HIDE`. A hidden window stops painting, and the
+challenge needs frames; the same measurement that rules out `--headless` rules out hiding.
+The style is per window, so it has to be (re)applied after the window exists: once when the page
+attaches, again when it becomes interactive (Chrome can restore a window on a crash).
+Best effort only — a failure here is cosmetic and must never fail the request.

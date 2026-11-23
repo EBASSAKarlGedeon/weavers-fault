@@ -167,3 +167,68 @@ list the fields they touch — not just the search route's response. Here the gr
 `name, avatarUrl, tokens, description, tags, creator, nsfw`, and the click paths needed
 `fullPath` and `source`. A provider that only matches the search response shape will
 render and then fail on the first interaction.
+
+---
+
+## 7. A backgrounded browser window stalls a Cloudflare challenge (and 45 s was too tight)
+
+**Symptom.** JannyAI "doesn't work" in the real app: a Chrome window appears, the page sits on
+"Loading JannyAI…", then the UI reports a timeout. The same code passed in a script.
+
+**Measured causes, both real:**
+- The automation browser is parked offscreen (`--window-position=-32000,-32000`). Windows treats
+  an unfocused/occluded window as background and throttles its timers, so Cloudflare's challenge
+  script never finishes. A *visible, focused* window from a test script cleared it in 9–18 s.
+- The challenge deadline was 45 s, while a truly cold profile measured ~42 s. Even without
+  throttling that is a coin flip.
+
+**Rules.**
+1. Keep the automation window unthrottled: `--disable-backgrounding-occluded-windows`,
+   `--disable-features=CalculateNativeWinOcclusion`, `--disable-background-timer-throttling`,
+   `--disable-renderer-backgrounding` — and re-assert focus over CDP while waiting
+   (`Page.bringToFront` + `Emulation.setFocusEmulationEnabled`).
+2. Size the deadline from the worst measurement, not the typical one: cold 120 s, warm 30 s
+   (a marker file records that this profile has already cleared once).
+3. On failure, tear the session down. A half-solved page reused by the next request fails
+   identically and looks like a permanent outage.
+4. Never conclude "the site is broken" from a timeout you imposed.
+
+---
+
+## 8. The index's totals are capped, so "of 4000 results" is a lie
+
+**Symptom.** Every filtered search reported `totalHits: 4000`, including a tag filter that
+visibly returned only a few matching characters, while a nonsense query correctly reported 0.
+
+**Cause.** Meilisearch caps paginated totals at the index's `maxTotalHits` (measured: exactly
+4000 for this index). Anything matching more documents than the cap reports the cap.
+
+**Rules.** Treat a total equal to the cap as unknown: report it as unavailable rather than as a
+number the user can compare against a filtered list. For infinite scroll, trust a short page
+(`hits.length < hitsPerPage`) over any total — that is the only reliable end-of-results signal.
+
+---
+
+## 9. Filter vocabulary must come from the source that will honour it
+
+**Symptom.** After adding JannyAI, the filter sheet still offered NSFL, NSFW-only, AI rating,
+minimum tag count, "with lorebooks / gallery images / custom prompt / example dialogues /
+alternate greetings" and "recommended / verified". None of them do anything on JannyAI: its
+index's filterable attributes are, verbatim from the API's own error message,
+`createdAtStamp, isLowQuality, isNsfw, permanentToken, tagIds, totalToken` — tag *ids* only,
+no tag names and none of chub's listing flags.
+
+Also: JannyAI card lists painted **two** safety chips (`SFW` and `#SFW`), because the source
+mapping added `'SFW'` to `tags` while the grid already derives a chip from `item.nsfw`.
+
+**Rules.**
+1. Ask the API what it can filter before designing a filter UI. Meilisearch answers that
+   question explicitly when you request an unknown facet: it lists the filterable attributes.
+2. Hide what the active source cannot honour, and keep the filter badge counting only visible,
+   honoured filters — otherwise the badge is unexplainable.
+3. Tag *names* are not in the index, so they are read from the site's own sidebar on a browse
+   page (`/?query=…&tag_id=<id>` links carry the emoji label and a `title` description), cached
+   for 7 days, with a measured fallback list. The site answers **500** for a one-character query
+   (`?query=a`), so the home page is the primary catalogue URL.
+4. Selection is stored as names (uniform with chub) and resolved to numeric ids server-side
+   through that cache, so a saved selection survives a reload.

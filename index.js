@@ -374,16 +374,21 @@ function resetAndSearch() {
 function activeFilterCount() {
     const f = state.filters;
     if (!f) return 0;
+    // Only count what the active source can honour — the sheet hides the rest,
+    // so a badge for a hidden switch would be unexplainable.
+    const chub = state.source === 'chub';
     let n = 0;
     if (f.nsfw) n++;
-    if (f.nsfwOnly) n++;
     if (f.minTokens !== FILTER_DEFAULTS.minTokens || f.maxTokens !== FILTER_DEFAULTS.maxTokens) n++;
-    if (f.minAiRating > 0) n++;
-    if (f.minTags > 0) n++;
-    for (const [key] of REQUIRE_ROWS) if (f[key]) n++;
-    if (f.recommendedVerified) n++;
     if (f.inclusiveOr && f.tags.size) n++;
     n += f.tags.size;
+    if (chub) {
+        if (f.nsfwOnly) n++;
+        if (f.minAiRating > 0) n++;
+        if (f.minTags > 0) n++;
+        for (const [key] of REQUIRE_ROWS) if (f[key]) n++;
+        if (f.recommendedVerified) n++;
+    }
     return n;
 }
 
@@ -395,8 +400,9 @@ function activeFilterCount() {
 function searchRequest() {
     const f = state.filters ?? { ...committedFilters(), tags: new Set() };
     if (state.source === 'janny') {
-        // The index pages by number and carries no tags of its own (its hits
-        // expose ids only), so only the token bound and NSFW flag travel.
+        // The index pages by number and filters on numeric tag ids; the sheet
+        // stores names, so they travel as names and the server resolves them
+        // through its cached catalog.
         return {
             url: '/api/weavers-vault/janny/search',
             source: 'JannyAI',
@@ -406,6 +412,8 @@ function searchRequest() {
                 nsfw: f.nsfw,
                 minTokens: f.minTokens,
                 maxTokens: f.maxTokens,
+                tags: [...f.tags],
+                inclusiveOr: Boolean(f.inclusiveOr),
                 sort: state.sort,
             },
         };
@@ -762,7 +770,7 @@ function wireToolbar() {
         state.tagQuery = q;
         state.tagExpanded = false;
         renderTagPicker();
-        if (q) tagSearchTimer = setTimeout(() => fetchTagSuggestions(q), 250); // Glaze's debounce
+        if (q && state.source !== 'janny') tagSearchTimer = setTimeout(() => fetchTagSuggestions(q), 250); // Glaze's debounce; JannyAI has the whole catalog locally
     });
     root.querySelector('.wv-tagclear').addEventListener('click', () => {
         root.querySelector('.wv-tagfilter').value = '';
@@ -812,16 +820,41 @@ function openFilterSheet() {
     state.tagSuggestions = [];
     root.querySelector('.wv-tagfilter').value = '';
     root.querySelector('.wv-tagclear').hidden = true;
-    // Tags are chub topics and the "Other" switches are chub flags; JannyAI's
-    // index exposes neither, so showing them would promise filtering that
-    // cannot happen. Only the token bound and NSFW flag apply there.
-    const chubOnly = state.source !== 'janny';
+    // Tags exist for chub (topics) and JannyAI (its own tag ids). Saucepan is not
+    // browsable, so it gets neither.
+    const tagsAvailable = state.source === 'chub' || state.source === 'janny';
     const tagCard = root.querySelector('.wv-tagshead')?.closest('.wv-mcard');
-    if (tagCard) tagCard.hidden = !chubOnly;
-    const otherCard = root.querySelector('.wv-mintags')?.closest('.wv-mcard');
-    if (otherCard) otherCard.hidden = !chubOnly;
+    if (tagCard) tagCard.hidden = !tagsAvailable;
+
+    // Chub-only filters: NSFL, NSFW-only, the per-card "recommended/verified"
+    // marker, AI rating, tag count and the "must include" cards are listing
+    // flags of chub's API. JannyAI's index can only filter createdAtStamp,
+    // isLowQuality, isNsfw, permanentToken, tagIds and totalToken, so showing
+    // these would promise filtering that never happens. Hiding is the honest
+    // option, and it keeps the badge count truthful.
+    const chubOnlyKeys = [
+        'nsfl', 'nsfwOnly', 'recommendedVerified', 'minAiRating', 'minTags',
+        ...REQUIRE_ROWS.map(([key]) => key),
+    ];
+    for (const key of chubOnlyKeys) {
+        const input = root.querySelector(`.wv-sheetbody input[data-filter="${key}"]`);
+        const row = input?.closest('.wv-mrow');
+        if (row) row.hidden = state.source !== 'chub';
+    }
+    // The two numeric fields have no data-filter attribute of their own.
+    for (const selector of ['.wv-minair', '.wv-mintags']) {
+        const row = root.querySelector(`.wv-sheetbody ${selector}`)?.closest('.wv-mrow');
+        if (row) row.hidden = state.source !== 'chub';
+    }
+    // The whole "must include" collapsible is chub-only too.
+    const collapsible = root.querySelector('.wv-sheetbody .wv-collapsible');
+    if (collapsible) collapsible.hidden = state.source !== 'chub';
+    // The "Other" card holds nothing else, so hide the whole card with it.
+    const otherCard = root.querySelector('.wv-sheetbody input[data-filter="recommendedVerified"]')?.closest('.wv-mcard');
+    if (otherCard) otherCard.hidden = state.source !== 'chub';
+
     overlay.hidden = false;
-    if (chubOnly) ensureTagCloud();
+    if (tagsAvailable) ensureTagCloud();
     renderTagPicker();
 }
 
@@ -895,14 +928,24 @@ async function ensureTagCloud() {
     state.tagCloudLoading = true;
     renderTagPicker();
     try {
-        const r = await fetch('/api/weavers-vault/chub/tags', {
-            method: 'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify({ limit: 500, sort: 'n_projects', nsfw: true, nsfl: true }),
-        });
-        const body = await r.json();
-        if (r.ok) state.tagCloud = (body.tags ?? []).map(t => t.name);
-        else toastr.error(body?.error || `chub.ai answered ${r.status}`, "Weaver's Vault tags");
+        if (state.source === 'janny') {
+            // JannyAI's labels live on the site, not in its search index (which
+            // only knows numeric tagIds); the server reads its sidebar once and
+            // caches it.
+            const r = await fetch('/api/weavers-vault/janny/tags', { headers: getRequestHeaders() });
+            const body = await r.json();
+            if (!r.ok) throw new Error(body?.error || `JannyAI answered ${r.status}`);
+            state.tagCloud = (body.tags ?? []).map(t => String(t.name ?? '').trim()).filter(Boolean);
+        } else {
+            const r = await fetch('/api/weavers-vault/chub/tags', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ limit: 500, sort: 'n_projects', nsfw: true, nsfl: true }),
+            });
+            const body = await r.json();
+            if (r.ok) state.tagCloud = (body.tags ?? []).map(t => t.name);
+            else toastr.error(body?.error || `chub.ai answered ${r.status}`, "Weaver's Vault tags");
+        }
     } catch (error) {
         toastr.error(error.message, "Weaver's Vault tags");
     } finally {
@@ -981,7 +1024,10 @@ function renderTagPicker() {
             .filter(s => s && !known.has(s.toLowerCase()) && ![...f.tags].some(t => t.toLowerCase() === s.toLowerCase()))
             .map(s => ({ name: s }));
         pool = [...local.map(t => ({ name: t })), ...remote];
-        const addRaw = ![...f.tags].some(t => t.toLowerCase() === query)
+        // JannyAI's vocabulary is closed (its index filters on numeric tag ids,
+        // so free text could never match anything) — no "add raw" chip there.
+        const addRaw = state.source !== 'janny'
+            && ![...f.tags].some(t => t.toLowerCase() === query)
             && !(state.tagCloud ?? []).some(t => t.toLowerCase() === query)
             && !remote.some(t => t.name.toLowerCase() === query);
         if (addRaw) pool.push({ name: query, addRaw: true });

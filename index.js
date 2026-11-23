@@ -1456,14 +1456,29 @@ const datacatBridge = {
     nonce: '',
     ready: false,
     listening: false,
-    imported: new Map(),   // datacatCharacterId → avatar filename
+    pulse: null,
+    acks: new Map(),   // requestId → {status, message, extra, expiresAt}
     active: new Set(),     // imports in flight
 };
 
 function datacatNonce() {
+    if (crypto?.randomUUID) return crypto.randomUUID();
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
     return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** DataCat only accepts the first-open flag once per account, like the extension. */
+function datacatFirstOpen() {
+    const store = settings();
+    return store.datacatFirstOpenAt ? false : true;
+}
+
+function rememberDatacatFirstOpen() {
+    const store = settings();
+    if (store.datacatFirstOpenAt) return;
+    store.datacatFirstOpenAt = new Date().toISOString();
+    saveSettingsQuiet();
 }
 
 function datacatBridgeUrl(nonce) {
@@ -1473,6 +1488,7 @@ function datacatBridgeUrl(nonce) {
     url.searchParams.set('dc_client', DC_CLIENT);
     url.searchParams.set('dc_client_version', DC_CLIENT_VERSION);
     url.searchParams.set('dc_auth_mode', DC_AUTH_MODE);
+    if (datacatFirstOpen()) url.searchParams.set('dc_first_open', '1');
     return url.href;
 }
 
@@ -1486,8 +1502,31 @@ function sendDatacatBridgeInit() {
     }
 }
 
+const DC_ACK_TTL_MS = 2 * 60 * 1000;
+
+function datacatPruneAcks() {
+    const now = Date.now();
+    for (const [id, ack] of datacatBridge.acks) if (!ack || ack.expiresAt <= now) datacatBridge.acks.delete(id);
+}
+
+function datacatRememberAck(requestId, status, message, extra) {
+    if (!requestId || (status !== 'ok' && status !== 'existing')) return;
+    datacatPruneAcks();
+    datacatBridge.acks.set(requestId, { status, message, extra: { ...extra }, expiresAt: Date.now() + DC_ACK_TTL_MS });
+}
+
+/** True when this request was already answered — the ack is re-sent instead. */
+function datacatReplayAck(requestId) {
+    datacatPruneAcks();
+    const ack = datacatBridge.acks.get(requestId);
+    if (!ack) return false;
+    postDatacatAck(requestId, ack.status, ack.message, ack.extra);
+    return true;
+}
+
 /** Ack back into the iframe; the site renders these as its import phases. */
 function postDatacatAck(requestId, status, message, extra = {}) {
+    datacatRememberAck(requestId, status, message, extra);
     const win = datacatBridge.frame?.contentWindow;
     if (!win || !datacatBridge.origin) return;
     try {
@@ -1508,10 +1547,19 @@ function isDatacatBridgeEvent(event) {
     return Boolean(event?.source && datacatBridge.frame && event.source === datacatBridge.frame.contentWindow);
 }
 
+/**
+ * DataCat asks the parent to (re)send the init payload by posting a READY
+ * message with needsInit:true — the extension detects exactly this shape.
+ */
 function isDatacatBridgeInitRequest(event) {
     if (!isDatacatBridgeEvent(event)) return false;
     const data = event.data;
-    return Boolean(data && typeof data === 'object' && data.type === 'datacat:st-bridge:init');
+    return Boolean(
+        data && typeof data === 'object'
+        && data.type === 'datacat:st-bridge:ready'
+        && data.needsInit === true
+        && datacatBridge.origin && event.origin === datacatBridge.origin,
+    );
 }
 
 function isTrustedDatacatEvent(event) {
@@ -1519,6 +1567,60 @@ function isTrustedDatacatEvent(event) {
     if (event.origin !== datacatBridge.origin) return false;
     const data = event.data;
     return Boolean(data && typeof data === 'object' && data.nonce === datacatBridge.nonce);
+}
+
+/** Port of the extension's sanitizeImportNamePart: a stable ASCII avatar name. */
+function datacatNamePart(value, fallback = 'character', maxLength = 48) {
+    const cleaned = String(value || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^\x20-\x7E]/g, '')
+        .replace(/[^a-zA-Z0-9._-]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, maxLength);
+    return cleaned || fallback;
+}
+
+/**
+ * DataCat's own avatar naming: `datacat_<title>_<shortId>`, used as
+ * `preserved_name` so a re-import of the same character is recognisable on
+ * disk, exactly like the official extension.
+ */
+function datacatPreservedName(metadata = {}) {
+    const id = datacatCharacterId(metadata);
+    const shortId = datacatNamePart(id.replace(/-/g, ''), 'unknown', 36);
+    const title = datacatNamePart(metadata.characterName || metadata.name, 'character', 44);
+    return `datacat_${title}_${shortId}`;
+}
+
+/** id -> avatar, persisted so a reload still recognises DataCat imports. */
+function datacatImportMap() {
+    const store = settings();
+    if (!store.datacatImports || typeof store.datacatImports !== 'object') store.datacatImports = {};
+    return store.datacatImports;
+}
+
+function datacatFindImported(metadata = {}) {
+    const id = datacatCharacterId(metadata);
+    const map = datacatImportMap();
+    const candidates = new Set();
+    if (id && map[id]) candidates.add(map[id]);
+    candidates.add(datacatPreservedName(metadata));
+    for (const candidate of candidates) {
+        const clean = String(candidate || '').replace(/\.png$/i, '');
+        if (!clean) continue;
+        const found = characters.find(c => String(c.avatar || '').replace(/\.png$/i, '') === clean);
+        if (found) return found;
+    }
+    return null;
+}
+
+function datacatRememberImport(metadata, fileName) {
+    const id = datacatCharacterId(metadata);
+    if (!id || !fileName) return;
+    datacatImportMap()[id] = fileName;
+    saveSettingsQuiet();
 }
 
 function datacatCharacterId(metadata = {}) {
@@ -1619,8 +1721,9 @@ function showDatacatBrowser() {
         if (!DC_NONCE.test(nonce)) return;
         const frame = document.createElement('iframe');
         frame.className = 'wv-dcframe';
-        frame.title = 'DataCat';
-        frame.setAttribute('allow', 'clipboard-write');
+        frame.title = 'Explore';
+        frame.loading = 'eager';
+        frame.setAttribute('referrerpolicy', 'no-referrer');
         // Same sandbox set the official extension uses: the site needs scripts,
         // forms and its own origin, but not top-level navigation.
         frame.setAttribute('sandbox', 'allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts');
@@ -1628,9 +1731,17 @@ function showDatacatBrowser() {
         datacatBridge.frame = frame;
         datacatBridge.origin = new URL(frame.src).origin;
         datacatBridge.nonce = nonce;
-        frame.addEventListener('load', sendDatacatBridgeInit);
+        frame.addEventListener('load', () => {
+            frame.dataset.datacatFrameLoaded = 'true';
+            sendDatacatBridgeInit();
+        });
         host.appendChild(frame);
         wireDatacatBridge();
+        // The site retries init at these offsets; mirror it so a dropped first
+        // message cannot leave the bridge dead, and keep a heartbeat going.
+        for (const delay of [350, 900, 1800, 3200]) setTimeout(sendDatacatBridgeInit, delay);
+        clearInterval(datacatBridge.pulse);
+        datacatBridge.pulse = setInterval(sendDatacatBridgeInit, 5000);
     }
     sendDatacatBridgeInit();
 }
@@ -1650,6 +1761,7 @@ function wireDatacatBridge() {
     datacatBridge.listening = true;
     window.addEventListener('message', (event) => {
         if (!datacatBridge.frame) return;
+        // The site asks for init with READY{needsInit:true} — not an init message.
         if (isDatacatBridgeInitRequest(event)) {
             datacatBridge.origin = event.origin;
             sendDatacatBridgeInit();
@@ -1660,16 +1772,22 @@ function wireDatacatBridge() {
 
         if (data.type === 'datacat:st-bridge:ready') {
             datacatBridge.ready = true;
+            if (data.analyticsFirstOpenAccepted === true) rememberDatacatFirstOpen();
             return;
+        }
+        // A retried request must get the same answer, not a second import.
+        if (data.type === 'datacat:st-character-card:prepare' || data.type === 'datacat:st-character-card') {
+            const replay = datacatReplayAck(String(data.requestId || ''));
+            if (replay) return;
         }
         if (data.type === 'datacat:st-character-card:prepare') {
             const requestId = datacatRequestId(data.requestId);
             if (!requestId) return;
             const id = datacatCharacterId(data.metadata);
-            const existing = datacatBridge.imported.get(id);
+            const existing = datacatFindImported(data.metadata);
             if (existing) {
                 postDatacatAck(requestId, 'existing', 'Found local copy.', {
-                    datacatCharacterId: id, avatar: existing, phase: 'Chat ready', step: 'existing', stepLabel: 'Open local copy',
+                    datacatCharacterId: id, avatar: existing.avatar, phase: 'Chat ready', step: 'existing', stepLabel: 'Open local copy',
                 });
                 return;
             }
@@ -1720,28 +1838,59 @@ async function importDatacatBridgeCard(payload) {
         if (!card.cardKind || card.cardBytes < 64) {
             throw new Error(`DataCat sent artwork only — no card data in the PNG (chunks: ${card.chunks.join(', ') || 'none'}).`);
         }
-        // DataCat emits a name-only card when it cannot pull the source
-        // definition (janitor-sourced characters, seen 2026-11-23). Importing
-        // that creates a character with every field empty, so refuse instead.
+        // DataCat builds a name-only card when its export cannot reach the
+        // source definition — most often because its own Turnstile check inside
+        // the frame was not completed. Importing that creates a character whose
+        // every field is empty, so refuse and point at the real cause.
         const name = String(metadata.characterName || metadata.name || 'datacat-character').trim();
         const texts = datacatCardTextLengths(card.cardText);
         if (texts && texts.total < 16) {
-            throw new Error(`DataCat built an empty card for "${name}" — its export returned no character text (source: ${metadata.sourceKind || 'unknown'}). That is DataCat's card, not a Loreweaver import problem.`);
+            throw new Error(`DataCat returned a card with no character text for "${name}". Its export needs DataCat's verification step (the captcha shown inside DataCat): complete it there and try again — without it DataCat sends the name only.`);
         }
-        const file = new File([png], `${name.replace(/[\\/:*?"<>|]/g, '_')}.png`, { type: 'image/png' });
+        // Same contract the official extension posts: the PNG as `avatar`, an
+        // explicit `file_type`, a stable `preserved_name`, and the provenance
+        // block as `datacat_metadata`.
+        const preservedName = datacatPreservedName(metadata);
+        const uploadName = `${datacatNamePart(
+            String(metadata.fileName || '').replace(/\.png$/i, '') || preservedName,
+            preservedName,
+            96,
+        )}.png`;
+        const file = new File([png], uploadName, { type: 'image/png' });
+        const formData = new FormData();
+        formData.append('avatar', file);
+        formData.append('file_type', 'png');
+        formData.append('preserved_name', preservedName);
+        formData.append('datacat_metadata', JSON.stringify({
+            source: 'datacat', provider: 'datacat',
+            datacatCharacterId: id, characterId: id,
+            characterName: String(metadata.characterName || metadata.name || '').slice(0, 256),
+            creatorName: String(metadata.creatorName || metadata.creator || '').slice(0, 256),
+            sourceKind: String(metadata.sourceKind || metadata.source_kind || '').slice(0, 64),
+            characterUrl: String(metadata.characterUrl || metadata.character_url || metadata.url || '').slice(0, 2048),
+        }));
 
         postDatacatAck(requestId, 'processing', 'Importing into Loreweaver…', {
             datacatCharacterId: id, phase: 'Importing PNG', step: 'st-import-png', stepLabel: 'Import PNG',
         });
-        const fileName = await importCharacter(file, { importTags: false });
-        if (!fileName) throw new Error('Loreweaver could not import this card.');
-        await getCharacters();
-
+        const headers = { ...getRequestHeaders() };
+        for (const key of Object.keys(headers)) if (key.toLowerCase() === 'content-type') delete headers[key];
+        const response = await fetch('/api/characters/import', {
+            method: 'POST', headers, body: formData, cache: 'no-cache',
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result?.error) {
+            throw new Error(result?.message || `Loreweaver could not import this PNG (${response.status}).`);
+        }
+        const importedBase = String(result.file_name || preservedName).trim().replace(/\.png$/i, '');
+        const fileName = `${importedBase}.png`;
+        datacatRememberImport(metadata, fileName);
+        // Phase order matches the extension: announce the refresh, then reload.
         postDatacatAck(requestId, 'processing', 'Refreshing library…', {
             datacatCharacterId: id, avatar: fileName, phase: 'Refreshing library', step: 'refresh-library', stepLabel: 'Refresh library',
         });
+        await getCharacters();
 
-        datacatBridge.imported.set(id, fileName);
         // Provenance for the ledger + the source link. Same shape the other
         // providers use: edit the live character object, then PUT the whole card
         // back — the endpoint rejects a partial payload ("invalid name").

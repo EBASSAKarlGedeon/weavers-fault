@@ -264,3 +264,31 @@ challenge needs frames; the same measurement that rules out `--headless` rules o
 The style is per window, so it has to be (re)applied after the window exists: once when the page
 attaches, again when it becomes interactive (Chrome can restore a window on a crash).
 Best effort only — a failure here is cosmetic and must never fail the request.
+
+---
+
+## 11. Killing the automation browser puts "Restore pages?" in the user's face
+
+**Symptom.** An occasional Chrome dialog reading "Restore pages? Chrome didn't shut down correctly",
+with a Restore button — shown to the user, on top of the vault.
+
+**Cause.** The idle teardown killed the browser (`child.kill()`), so Chrome recorded an unclean
+exit: the profile's `Default/Preferences` read `profile.exit_type: "Crashed"` (measured). On the
+next launch Chrome treats that as a crash, offers to restore, and — this is why it was *visible* —
+that prompt is browser UI, not something the offscreen window position controls.
+
+Second, smaller trap: `Browser.log`-style politeness is not enough on its own. Even after a
+graceful close Chrome leaves `exit_type: "Crashed"` in the file while `exited_cleanly: true`;
+it writes "Crashed" while running and does not reliably flush the clean value on the way out
+(measured right after a polite `Browser.close`).
+
+**Rules.**
+1. Close through the browser, not the process: send `Browser.close` on the browser endpoint and
+   wait for the process to exit; only then force it. This is also what makes a *hot* profile
+   reusable, since the shutdown flushes the session.
+2. Do not trust the file to be right in either direction: repair it before every launch
+   (`exit_type: Normal`, `exited_cleanly: true`) and record the same state after our own orderly
+   close. The repair also covers a wedge or a crash we did not cause.
+3. Add `--hide-crash-restore-bubble` as the last line of defence.
+4. A browser-UI dialog cannot be hidden by positioning or window styles, so it must never be
+   allowed to appear; assume any such prompt will land in the middle of the user's screen.

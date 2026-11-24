@@ -142,14 +142,30 @@ textarea (#20); a fresh account cannot generate at all — JanitorAI demands a p
 field that was null could never read clean (#22); and a status poll could close the window a human was
 filling (#23).
 
-**S6 — Bio converter.** Port `janitor2st.py` to `janitor-html.js`: `{user}`→`{{user}}` (never touching
-existing `{{…}}`), relative→absolute links, `/external-link?to=` decoding, `oklab()`→hex, dark
+**S6 — Bio converter.** Port `janitor2st.py` to `src/endpoints/weavers-vault-janitor-html.js`: `{user}`→`{{user}}`
+(never touching existing `{{…}}`), relative→absolute links, `/external-link?to=` decoding, `oklab()`→hex, dark
 `<mark>`→white text, `text: center`→`text-align`, `align=""`, `width:Npx`→`max-width:min(Npx,100%)`,
 `height:auto`, `border-radius:8px`, strip empty `<p>`, strip svg/style/lightbox attrs, credit line.
 Drop the page-CSS class inlining — our HTML comes from the API, not a pasted page, so there is no
 stylesheet to inline (this also retires the `div.css-ly0sg4` heuristic).
-*Accept:* run over a real bio: macro conversion count > 0, no `class=` survives, no `oklab(` survives,
-credit line present, and the plain-text fallback produces identical text for a tag-free input.
+
+*Status: IMPLEMENTED and covered, one real-bio sample still owed.* The port is a dependency-free
+parser + the Python's pipeline in its order (no jsdom, no BeautifulSoup: the same module runs in Node
+and could run in a browser). 55 tests in `tests/vault/janitor-html.test.js`, and the oklab expectations
+were produced by running the Python itself, so they are cross-implementation checks.
+`creator_notes` now keeps the bio's formatting for both the public and the capture path, instead of the
+old `janitorHtmlToText` flattening.
+
+Three defects in the **Python** were found by measuring it, all written up in `PITFALLS.md` #24–#26:
+`/external-link?to=…` never decoded (its regex needs a second `?`/`&`), a colour that is the first style
+declaration invisible to the light-theme scan, and `&nbsp;`-only paragraphs surviving the empty-strip
+because a string-level port does not decode entities. Two decisions of ours are recorded too: the output
+is **sanitised** (#27) because it now feeds `innerHTML` and a stored card, and the module lives in `src/`
+(#28) because the extension tree is gitignored in the main repo.
+
+Client side: the closed card's sheet renders the server's `bioHtml` — verified in a real browser with an
+intercepted payload (bold kept, `{{macros}}`, `min(350px, 100%)`, white `<mark>`, oklab→hex, decoded link,
+no handler, no class, no escaped tags, no page errors).
 
 **S7 — Browse UI.** Source entry, grid, search box, tag chips from the cached catalogue, sort menu.
 *Accept:* at 1500×950 and 390×844: grid renders 2-up on phone, chub-only filter rows stay hidden,

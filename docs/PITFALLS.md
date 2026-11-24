@@ -481,3 +481,62 @@ A trivial `window.__probe = 1` behaves identically, so this is the mechanism, no
 **Rule.** A hold taken for a human mid-task is *sticky*: `hold(ttlMs, { sticky: true })` can only be ended by its own deadline, and `release()` is a no-op while it lasts. The persona wall uses a sticky 20-minute hold.
 
 **Check.** Reveal the persona form, call `/janitor/account` twice, wait 40 s: the browser must still be running (measured: 0 chrome processes before the fix, alive after).
+
+## 24. The user's own converter never decoded `/external-link?to=…`
+
+**Symptom.** After porting `janitor2st.py`, bio links still pointed at JanitorAI — `href="https://janitorai.com/external-link?to=https%3A%2F%2Fexample.com"` — instead of at the creator's actual link.
+
+**Measured cause.** The Python's regex is `^(?:https?://janitorai\.com)?/external-link\?.*?[?&]to=([^&\s]+)`. Run against the shapes the site emits:
+
+| href | Python's match |
+|---|---|
+| `/external-link?to=https%3A%2F%2Fexample.com%2Fa` | **none** |
+| `/external-link?x=1&to=https%3A%2F%2Fexample.com%2Fa` | `https%3A%2F%2Fexample.com%2Fa` |
+| `https://janitorai.com/external-link?to=…` | **none** |
+| `/external-link?to=a%3Fb%3D1` | **none** |
+
+`.*?[?&]to=` needs a second `?`/`&` before `to=`, so the form the site actually uses (`to=` first) never matched — it fell through to the "relative link" branch and became a redirect kept *through* JanitorAI. The port reads the `to` parameter with `URLSearchParams` when the path is `/external-link`, and keeps the regex for the odd shape.
+
+**Rule.** When porting a script, port its *intent*, and measure the inputs: a regex that only ever matched one of four shapes passed for years because the other three still produced a working-looking link.
+
+**Check.** `convertJanitorBio('<a href="/external-link?to=https%3A%2F%2Fexample.com%2Fa">')` must contain `href="https://example.com/a"` and the log must say `Decoded 1 JanitorAI redirect link(s)`.
+
+## 25. A colour as the first style declaration was invisible to the review scan
+
+**Symptom.** A bio whose only styling was `style="color: #ffffff"` produced no dark-theme warning, so a white-text bio went into a light theme and disappeared.
+
+**Measured cause.** The Python matches `(?:^|[;\s])(color|background-color|background)\s*:` — but in serialized HTML the declaration is preceded by a quote (`style="color: #ffffff"`), which is neither `;` nor whitespace. Colours that followed another declaration (`text-align: center; color: #fff`) matched, which is why the gap survived.
+
+**Rule.** Scan serialized HTML with the serialization's own boundaries: quotes are part of an attribute's syntax. The port's boundary class is `[;\s"']`.
+
+**Check.** `convertJanitorBio('<p style="color: #ffffff">x</p>').log` must contain the light-colour warning.
+
+## 26. Entity decoding decides whether a paragraph is empty
+
+**Symptom.** `<p>&nbsp;</p>` — the most common spacer in a JanitorAI bio — survived the empty-paragraph strip and rendered as a gap.
+
+**Measured cause.** BeautifulSoup decodes entities, so the Python sees a `\xa0`, replaces it with a space, and removes the paragraph. A string-level port that keeps `&nbsp;` as six characters sees content and keeps it.
+
+**Rule.** Decode entities when building the tree (`&amp; &lt; &gt; &quot; &#39; &nbsp;` + numeric forms), and escape again on output. Unknown named entities are left alone so they survive instead of becoming `&amp;name;`.
+
+**Check.** `<p>a</p><p>&nbsp;</p><p>b</p>` must yield two paragraphs and a `Removed 1 empty spacer paragraphs` log line.
+
+## 27. A converter that feeds `innerHTML` must sanitise
+
+**Symptom.** Not yet observed — and it must stay that way. The converter's output is now rendered in the vault sheet *and* stored in a card, automatically, from third-party HTML.
+
+**Measured cause.** `janitor2st.py` only drops `<svg>` and `<style>`. That is defensible for a tool whose output a human pastes into SillyTavern (they can see what landed). Ours is neither inspected by a human nor inert: `renderDetailClosed` sets it with `innerHTML`, so `<img onerror=…>`, `<script>` or `href="javascript:…"` would execute in the Loreweaver origin.
+
+**Rule.** Strip `<script> <style> <svg> <iframe> <object> <embed> <form> <input> <button> <meta> <link>`, every `on*` attribute and every `javascript:` URL, and log `[SAFE] Removed N executable attribute(s)`. The bio is untrusted text about a character, never markup we authored.
+
+**Check.** `<p onclick="steal()">` loses its handler; `<iframe>` and `<script>` vanish; a `https:` link keeps its href.
+
+## 28. The extension tree is gitignored in the main repo, so the server must not import from it
+
+**Symptom.** Caught before it shipped: moving the bio converter into `public/scripts/extensions/weavers-vault/` and importing it from `src/endpoints/` worked locally, because that directory exists on this machine.
+
+**Measured cause.** `.gitignore:70` ignores `public/scripts/extensions/weavers-vault/` in the **main** repo — it is a separate clone with its own remote (`weavers-fault`). A fresh clone of Loreweaver therefore has no such file, and the server would fail at module load, not at request time. `git ls-files` shows zero tracked files under that path.
+
+**Rule.** Server code may not import from `public/scripts/extensions/**`. Shared logic lives in `src/` and the client receives it as data (here: the server converts the bio and returns `bioHtml`). One implementation, no second copy in the extension.
+
+**Check.** `git ls-files src/endpoints | grep janitor-html` finds the module, and `grep -rn "public/scripts/extensions" src/` finds no import.

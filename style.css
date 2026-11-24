@@ -2161,3 +2161,36 @@
     max-width: 100%;
     word-break: break-word;
 }
+
+/* Converted bio HTML (janitor-html.js output): the card's own paragraphs, and
+   nothing that could escape the sheet. */
+.wv-biohtml p {
+    margin: 0 0 10px;
+}
+
+.wv-biohtml p:last-child {
+    margin-bottom: 0;
+}
+
+.wv-biohtml img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+}
+
+.wv-biohtml a {
+    color: var(--wv-accent);
+    text-decoration: underline;
+}
+
+.wv-biohtml hr {
+    border: none;
+    border-top: 1px solid var(--wv-ov);
+    margin: 14px 0;
+}
+
+.wv-biohtml h1, .wv-biohtml h2, .wv-biohtml h3, .wv-biohtml h4 {
+    margin: 12px 0 8px;
+    font-size: 15px;
+    font-weight: 700;
+}

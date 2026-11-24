@@ -1346,6 +1346,12 @@ const DETAIL_PROMPT_SECTIONS = [
 function renderDetailClosed(popup, item, report) {
     const row = report?.row ?? {};
     const reason = janitorBlockMessage(report);
+    // S6: the bio is HTML on the site and keeps its formatting. The server
+    // converts it with the same module that fills `creator_notes` and sends the
+    // result as `bioHtml` — one implementation, and it strips classes, inline
+    // hazards and anything executable, so rendering it here is safe. The credit
+    // line belongs to the stored card, not to this preview.
+    const bioHtml = String(report?.bioHtml ?? '');
     const bio = String(row.blurb ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
     const tags = [...(row.tags ?? []), ...(row.customTags ?? [])].filter(Boolean).slice(0, 8);
     popup.innerHTML = `
@@ -1364,9 +1370,11 @@ function renderDetailClosed(popup, item, report) {
                         <div>${escapeHtml(reason)}</div>
                     </div>
                     <div class="wv-dtagwrap">${tags.map(detailTagChip).join('')}</div>
-                    ${bio ? `
+                    ${bioHtml ? `
                         <div class="wv-dseclabel">Public bio</div>
-                        <div class="wv-bio">${escapeHtml(bio)}</div>` : ''}
+                        <div class="wv-bio wv-biohtml">${bioHtml}</div>` : (bio ? `
+                        <div class="wv-dseclabel">Public bio</div>
+                        <div class="wv-bio">${escapeHtml(bio)}</div>` : '')}
                     <div class="wv-dseclabel">Recover</div>
                     <div class="wv-recover">
                         <div class="wv-recovernote">
@@ -1452,6 +1460,9 @@ function renderDetail(popup, item, character) {
     // Description block inside the Prompt Blocks tab. Rendering `description`
     // here showed a completely different text than the real app.
     const bioText = String(d.creator_notes ?? '').trim();
+    // A janitor card's notes are converted bio HTML (janitor-html.js, sanitised);
+    // every other source's notes are plain text and stay escaped.
+    const isHtml = d.extensions?.vault_source === 'janitor' && /^<(div|p|h[1-6]|ul|ol|blockquote)/i.test(bioText);
     const greetings = [d.first_mes, ...(d.alternate_greetings ?? [])].filter(g => g && g.trim());
 
     popup.innerHTML = `

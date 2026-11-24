@@ -282,6 +282,38 @@ only" as an import mode for this source.
 **S9 — Ledger and errors.** Every import lands in the existing `ledger`; every failure states a
 reason (`unproxyable`, `closed-capture-failed`, `challenge`, `signed-out`, `rate-limited`).
 
+*Status: DONE, verified in the real UI (2026-11-26).*
+
+One vocabulary, defined once in `src/endpoints/weavers-vault-janitor.js`:
+`JANITOR_FAILURE_REASONS` = `unproxyable, private, deleted, missing, no-definition,
+closed-capture-failed, profile-required, challenge, signed-out, rate-limited, transport,
+no-browser, unparseable, server, bad-id`, and `janitorFailureReason({code, status, challenged})`
+which maps the transport's word (`janitor_challenge`) onto the phenomenon (`challenge`). 45 tests in
+`tests/vault/janitor-failures.test.js` pin every pair, every status fallback, and that a challenge
+flag outranks all of them.
+
+The mapping is applied at **one** place: a router middleware stamps `reason` onto every
+`/janitor/*` error body, so no route can forget it and no client code translates codes.
+
+Client side, `ledgerFail(item, what, reason)` is now called from every failure path: paste-to-import,
+recovery (both the refusal and the throw), janny/janitor card import, chub (card and book-only),
+saucepan (URL and extraction), JanitorAI lorebooks, and the DataCat bridge. Two gaps found while
+wiring: **DataCat never wrote to the ledger at all** (so "imported before" never warned for it) and
+`ledgerAdd` had no DataCat branch, so its URL would have been recorded as a chub link.
+
+Verified by driving the UI and reading the app's own settings: pasting a non-existent id produced
+`{"source":"janitor","what":"blocked","reason":"missing"}` with the matching toast, and pasting a
+real card on a signed-out session produced `reason:"no-definition"`. The first attempt recorded
+`janitor_missing` instead — the reason was dropped between route and ledger because the thrown error
+carried only the code; that is PITFALLS #32, fixed by making the error carry `reason`.
+
+Noted, not a defect: typing a *non*-JanitorAI URL into the JanitorAI search box runs a search, it
+does not call the import path (the input handler guards on `parseJanitorIdLocal`), so the `bad-id`
+reason there is defensive rather than reachable by typing.
+
+Still open: the ledger has no UI view — it lives in extension settings and is read by the
+duplicate-import warning; a history sheet is a UI decision, not part of this contract.
+
 ## 5. Test matrix
 
 | Area | Method |

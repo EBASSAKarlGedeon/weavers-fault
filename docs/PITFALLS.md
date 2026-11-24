@@ -580,3 +580,33 @@ div.wv-tinput > div.wv-range > div.wv-rangerow > section.wv-mcard > div.wv-sheet
 **Rule.** When a rule hides UI by class, assert the class exists in the live DOM first — a `null` from `closest()` is silent. And prefer hiding the smallest honest unit: here the `.wv-rangerow` *and* its Card section, which afterwards holds only chub-only rows.
 
 **Check.** On a phone-width sheet for JanitorAI: "Token Range", "Minimum AI rating", "Minimum tag count" are all absent, while Content and Tags remain.
+
+## 32. A classification carried in `code` is lost the moment it crosses a boundary
+
+**Symptom.** S9's ledger recorded `{"what":"blocked","reason":"janitor_missing"}` for a paste of a
+non-existent character, while the toast said "JanitorAI has no character with that id." The route
+had answered `{"code":"janitor_missing","reason":"missing"}` — measured, the reason was there and
+was then dropped.
+
+**Measured cause.** `failureReason()` prefers `source.reason ?? source.code`, but the paste path
+does not throw the payload — it throws the error it built:
+
+```js
+if (!r.ok) throw vaultError(payload?.error || `…`, payload?.code, r.status);   // code only
+…
+} catch (error) { ledgerFail(item, 'blocked', failureReason(error, error.status)); }
+```
+
+`vaultError` stored `code` and `status` but not `reason`, so the ledger fell through to the
+transport code. Nothing failed loudly: the ledger simply recorded a word that means nothing to a
+reader, and the vocabulary the plan asks for (`missing`, `challenge`, `signed-out`, …) never
+reached it.
+
+**Rule.** When a value is deliberately translated at a boundary (transport code → phenomenon), the
+translated value must travel *on the thing that crosses the boundary*. `vaultError` now takes a
+fourth argument and stores `reason`, and every janitor throw passes `payload.reason`. Never
+re-derive a user-facing reason from a code at the consumer when the producer already sent one.
+
+**Check.** Paste `https://janitorai.com/characters/00000000-0000-4000-8000-000000000001`: the new
+ledger line must read `"reason":"missing"`, not `"reason":"janitor_missing"`. Measured after the
+fix: `{"source":"janitor","id":"00000000-…-000000000001","what":"blocked","reason":"missing"}`.

@@ -1352,7 +1352,7 @@ async function openDetail(item, preloaded = null, report = null) {
                 signal: detailAbort.signal,
             });
             const payload = await r.json();
-            if (!r.ok) throw vaultError(payload?.error || `${janitor ? 'JanitorAI' : 'JannyAI'} answered ${r.status}`, payload?.code, r.status);
+            if (!r.ok) throw vaultError(payload?.error || `${janitor ? 'JanitorAI' : 'JannyAI'} answered ${r.status}`, payload?.code, r.status, payload?.reason);
             if (janitor) {
                 // A closed card is a classification, not an error: it has no
                 // importable text at all, so the detail has to say so.
@@ -1533,6 +1533,7 @@ async function recoverJanitorCard(item, popup, button, status) {
             if (payload?.code === 'janitor_profile_required') {
                 button.querySelector('span:last-child').textContent = 'Retry after completing your profile';
             }
+            ledgerFail(item, 'capture', failureReason(payload, r.status));
             toastr.error(status.textContent, "Weaver's Vault");
             return;
         }
@@ -1544,6 +1545,7 @@ async function recoverJanitorCard(item, popup, button, status) {
     } catch (error) {
         console.error(`[${extensionName}] janitor capture failed`, error);
         status.textContent = error.message;
+        ledgerFail(item, 'capture', failureReason(error, error.status));
         toastr.error(error.message, "Weaver's Vault capture failed");
     } finally {
         clearInterval(tick);
@@ -1781,10 +1783,25 @@ function showImportModeSheet(item, character) {
  * @param {number} status
  * @returns {Error}
  */
-function vaultError(message, code, status) {
+/**
+ * An error that carries the route's own classification.
+ *
+ * `reason` is kept separately from `code` on purpose: the code is the
+ * transport's word (`janitor_missing`), the reason is the phenomenon the ledger
+ * records (`missing`). Passing the code through as the reason produced ledger
+ * lines reading `janitor_missing` — measured 2026-11-26 — so the server's reason
+ * travels with the error and is preferred by `failureReason`.
+ * @param {string} message
+ * @param {string} [code]
+ * @param {number} [status]
+ * @param {string} [reason]
+ * @returns {Error}
+ */
+function vaultError(message, code, status, reason) {
     const error = new Error(message);
     error.code = code;
     error.status = status;
+    if (reason) error.reason = String(reason);
     return error;
 }
 
@@ -1813,9 +1830,42 @@ function ledgerAdd(item, what, reason = '') {
                 ? `https://jannyai.com/characters/${item.fullPath}`
                 : source === 'janitor'
                     ? `https://janitorai.com/characters/${item.fullPath}`
+                    : source === 'datacat'
+                        ? `https://datacat.run/characters/${item.fullPath}`
                 : `https://chub.ai/characters/${item.fullPath}`,
     });
     saveSettingsQuiet();
+}
+
+/**
+ * Record a failure, always with a reason (S9).
+ *
+ * "Every import lands in the ledger; every failure states a reason": a line that
+ * says only `character` leaves the next debugging session guessing, so the
+ * reason is required here and never defaulted to a shrug.
+ * @param {{source?: string, fullPath?: string, name?: string}} item
+ * @param {string} what 'character' | 'lorebook' | 'lorebooks' | 'blocked' | 'capture'
+ * @param {string} reason a token from `JANITOR_FAILURE_REASONS` (server) or a status
+ */
+function ledgerFail(item, what, reason) {
+    ledgerAdd(item, what, String(reason ?? '').trim() || 'unknown');
+}
+
+/**
+ * The reason out of a route error body, or a thrown `vaultError`, or the status.
+ *
+ * JanitorAI routes send `reason` (derived once, server-side, by
+ * `janitorFailureReason`); the other sources answer with a bare status.
+ */
+function failureReason(source, status = 0) {
+    const reason = source?.reason ?? source?.code;
+    if (reason) return String(reason);
+    return status ? `http-${status}` : 'unknown';
+}
+
+/** A ledger item for a failure with no imported character behind it. */
+function ledgerItemFor(source, id, name = '') {
+    return { source, fullPath: String(id ?? ''), id: String(id ?? ''), name: String(name ?? '') };
 }
 
 // ─── Provider switch (M4) ────────────────────────────────────────────────────
@@ -2383,6 +2433,7 @@ function wireDatacatBridge() {
         if (data.type === 'datacat:st-character-card') {
             importDatacatBridgeCard(data).catch((error) => {
                 console.error("[Weaver's Vault] DataCat import failed:", error);
+                ledgerFail(ledgerItemFor('datacat', datacatCharacterId(data.metadata)), 'character', failureReason(error, error.status));
                 postDatacatAck(datacatRequestId(data.requestId), 'error', error?.message || 'DataCat import failed.');
                 toastr.error(error?.message || 'DataCat import failed.', "Weaver's Vault");
             });
@@ -2511,6 +2562,9 @@ async function importDatacatBridgeCard(payload) {
         postDatacatAck(requestId, 'ok', 'Imported into Loreweaver.', {
             datacatCharacterId: id, avatar: fileName, phase: 'Chat ready', step: 'open-chat', stepLabel: 'Open chat',
         });
+        // DataCat imports went unrecorded: the ledger only ever saw chub, janny,
+        // saucepan and janitor, so "imported before" never warned for this source.
+        ledgerAdd(ledgerItemFor('datacat', id, name), 'character');
         toastr.success(`Imported ${name}`, "Weaver's Vault");
     } finally {
         datacatBridge.active.delete(id);
@@ -2537,6 +2591,7 @@ async function importJanitorUrl(url) {
     const status = root.querySelector('.wv-status');
     const id = parseJanitorIdLocal(url);
     if (!id) {
+        ledgerFail(ledgerItemFor('janitor', url), 'blocked', 'bad-id');
         status.classList.add('wv-status-error');
         status.textContent = 'That is not a JanitorAI character link.';
         return;
@@ -2550,11 +2605,13 @@ async function importJanitorUrl(url) {
             body: JSON.stringify({ id }),
         });
         const payload = await r.json().catch(() => null);
-        if (!r.ok) throw vaultError(payload?.error || `JanitorAI answered ${r.status}`, payload?.code, r.status);
+        if (!r.ok) throw vaultError(payload?.error || `JanitorAI answered ${r.status}`, payload?.code, r.status, payload?.reason);
         if (payload.needsCapture) {
             // Not an error: the card exists, its definition is closed. Saying so
             // is honest; importing it anyway would create a blank character.
             janitorCards.set(id, payload);
+            // Not imported, and the ledger says so with the site's own reason.
+            ledgerFail(ledgerItemFor('janitor', id, payload.row?.name ?? ''), 'blocked', payload.blockReason || 'no-definition');
             status.classList.add('wv-status-error');
             status.textContent = janitorBlockMessage(payload);
             const item = { id, fullPath: id, name: payload.row?.name ?? '', source: 'janitor' };
@@ -2575,6 +2632,7 @@ async function importJanitorUrl(url) {
         status.textContent = '';
         openDetail(item, character);
     } catch (error) {
+        ledgerFail(ledgerItemFor('janitor', id), 'blocked', failureReason(error, error.status));
         status.classList.add('wv-status-error');
         status.textContent = error.message;
     }
@@ -2707,6 +2765,7 @@ function openSaucepanTokenSheet(retryUrl) {
 async function importSaucepanCharacter(item, character) {
     const cardFile = saucepanFiles.get(item.fullPath);
     if (!cardFile) {
+        ledgerFail(item, 'character', 'no-extract');
         toastr.error('Extraction data missing — paste the companion URL again.', "Weaver's Vault");
         return;
     }
@@ -2730,6 +2789,7 @@ async function importSaucepanCharacter(item, character) {
         toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
     } catch (error) {
         console.error(`[${extensionName}] import failed`, error);
+        ledgerFail(item, 'character', failureReason(error, error.status));
         toastr.error(error.message, "Weaver's Vault import failed");
     }
 }
@@ -2752,11 +2812,12 @@ async function importJannyCharacter(item, character, route = '/janny/card', cach
                 body: JSON.stringify({ id: item.fullPath, name: item.name }),
             });
             const payload = await r.json();
-            if (!r.ok) throw vaultError(payload?.error || `The source answered ${r.status}`, payload?.code, r.status);
+            if (!r.ok) throw vaultError(payload?.error || `The source answered ${r.status}`, payload?.code, r.status, payload?.reason);
             cardFile = payload.file;
             cache.set(item.fullPath, cardFile);
             character = payload.character;
         } catch (error) {
+            ledgerFail(item, 'character', failureReason(error, error.status));
             toastr.error(error.message, "Weaver's Vault import failed");
             return;
         }
@@ -2779,6 +2840,7 @@ async function importJannyCharacter(item, character, route = '/janny/card', cach
         return importedAvatar;
     } catch (error) {
         console.error(`[${extensionName}] import failed`, error);
+        ledgerFail(item, 'character', failureReason(error, error.status));
         toastr.error(error.message, "Weaver's Vault import failed");
         return null;
     }
@@ -2808,9 +2870,9 @@ async function importJanitorLorebooks(item, avatar) {
             body: JSON.stringify({ id: item.fullPath, name: item.name }),
         });
         payload = await r.json();
-        if (!r.ok) throw vaultError(payload?.error || `JanitorAI answered ${r.status}`, payload?.code, r.status);
+        if (!r.ok) throw vaultError(payload?.error || `JanitorAI answered ${r.status}`, payload?.code, r.status, payload?.reason);
     } catch (error) {
-        ledgerAdd(item, 'lorebooks', 'unavailable');
+        ledgerFail(item, 'lorebooks', failureReason(error, error.status));
         toastr.error(`Could not read the character's lorebooks: ${error.message}`, "Weaver's Vault lorebooks");
         return [];
     }
@@ -2925,6 +2987,7 @@ async function importChubCharacter(item, character, withBook) {
         toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
     } catch (error) {
         console.error(`[${extensionName}] import failed`, error);
+        ledgerFail(item, 'character', failureReason(error, error.status));
         toastr.error(error.message, "Weaver's Vault import failed");
     }
 }
@@ -2940,6 +3003,7 @@ async function importChubLorebookOnly(item, character) {
         ledgerAdd(item, 'lorebook');
         toastr.success(`Lorebook '${bookName}' imported.`, "Weaver's Vault");
     } catch (error) {
+        ledgerFail(item, 'lorebook', failureReason(error, error.status));
         toastr.error(error.message, "Weaver's Vault import failed");
     }
 }

@@ -564,3 +564,19 @@ The box looked empty because the placeholder had been rewritten for browsing whi
 **Rule.** A normalizer must fill every field it declares. When the payload shape is known (objects, not ids), map it — and let the UI pass read the chips, because "the field exists" is not "the field has content".
 
 **Check.** `normalizeJanitorHit(row).tags` equals `['Male']` for a row with one tag object, and every grid card shows its tag chips.
+
+## 31. Hiding a filter row by its assumed class hid nothing
+
+**Symptom.** The phone filter sheet still offered "Token Range" for JanitorAI, whose listing has no token parameter at all.
+
+**Measured cause.** The rule hid `.wv-mintok`'s `closest('.wv-mrow')`. Measured in the live DOM, the token range is not a `.wv-mrow` at all:
+
+```
+div.wv-tinput > div.wv-range > div.wv-rangerow > section.wv-mcard > div.wv-sheetbody
+```
+
+`closest('.wv-mrow')` returned `null`, so nothing was hidden and the sheet advertised a filter that could never run. The neighbouring numeric fields (AI rating, tag count) *are* `.wv-mrow`s, which is why the same pattern worked one row down.
+
+**Rule.** When a rule hides UI by class, assert the class exists in the live DOM first — a `null` from `closest()` is silent. And prefer hiding the smallest honest unit: here the `.wv-rangerow` *and* its Card section, which afterwards holds only chub-only rows.
+
+**Check.** On a phone-width sheet for JanitorAI: "Token Range", "Minimum AI rating", "Minimum tag count" are all absent, while Content and Tags remain.

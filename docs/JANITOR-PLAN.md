@@ -190,7 +190,9 @@ Measured on the live site:
 Two defects, both written up in `PITFALLS.md`:
 - the persisted S4 paste-URL leaked in as a search phrase, so the first grid showed "No results"
   while the box looked empty (#29);
-- the row normalizer declared `tags` and never filled it, so every card was chipless (#30).
+- the row normalizer declared `tags` and never filled it, so every card was chipless (#30);
+- the token-range row is a `.wv-rangerow`, not a `.wv-mrow`, so the rule that hides it found nothing
+  and the phone sheet kept offering a filter JanitorAI cannot run (#31).
 
 The 7 px horizontal overflow at 390 px is **not ours**: measured with the vault closed, it comes from
 `div.drawer.datacat-browser-topbar-slot` (the DataCat extension's topbar button) at `right: 397`.

@@ -943,11 +943,16 @@ function openFilterSheet() {
     // rather than offered (the rule from PITFALLS #13: never offer a control the
     // source cannot honour).
     if (state.source === 'janitor') {
-        // The token range is one row holding both fields (`.wv-mintok`/`.wv-maxtok`).
-        for (const selector of ['.wv-mintok', '.wv-maxtok']) {
-            const row = root.querySelector(`.wv-sheetbody ${selector}`)?.closest('.wv-mrow');
-            if (row) row.hidden = true;
-        }
+        // The token range is not a `.wv-mrow`: it is a `.wv-rangerow` (label +
+        // two fields) inside the Card section, so a `closest('.wv-mrow')` found
+        // nothing and the row stayed on screen promising a filter that never
+        // happens (measured on the phone sheet).
+        const rangeRow = root.querySelector('.wv-sheetbody .wv-rangerow');
+        if (rangeRow) rangeRow.hidden = true;
+        // The whole Card section then holds only the chub-only numeric rows
+        // (AI rating, tag count), which are hidden just above.
+        const cardSection = rangeRow?.closest('.wv-mcard');
+        if (cardSection) cardSection.hidden = state.source === 'janitor';
         const anyTag = root.querySelector('.wv-sheetbody input[data-filter="inclusiveOr"]')?.closest('.wv-mrow');
         if (anyTag) anyTag.hidden = true;
     }

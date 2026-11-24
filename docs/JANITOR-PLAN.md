@@ -207,6 +207,48 @@ LLM path, not a new one); each becomes `<character> — <book>`; card records th
 `data.extensions.vault_lorebooks` lists both. A transport failure is reported as a **failure**, never
 as "closed" (Glaze's `!accessible && !isJs` swallows errors — do not inherit that).
 
+*Measured 2026-11-26 — 15 requests total (6 + 5 + 3 + 1), no loops, nothing written.*
+
+A `scripts[]` entry (card details; the **listing** rows do not carry `scripts`):
+
+```json
+{"type":"lorebook","id":"47c1eed5-f087-4777-a8ed-e37f0c3990b5",
+ "title":"Heroes and Villains","description":"Information about heroes and Villains in this RPG",
+ "theme":"red","user_id":"…","user_name":"1Reika2","is_public":true,
+ "updated_at":"2026-08-08T18:57:45.762+00:00","message_count":51336}
+```
+
+`GET /hampter/script/{id}` on a public book answers **200** (19 645 bytes) with record keys
+`type,id,user_id,user_name,user_verified,user_plusbadge,user_display_prefs,title,description,theme,depth,
+is_public,is_code_public,is_comment_allowed,script,draft,settings,engine_version,created_at,updated_at,
+original_script,characters,message_count`, and `script` is **a JSON array inside a string**. Entry keys:
+`category,content,enabled,id,key,keysRaw,minMessages,priority,probability,insertion_order,keywordsRaw,constant`.
+Entry ids are UUIDs; keys arrive both as an array (`key`) and a comma string (`keysRaw`).
+
+What this settles:
+
+1. **`is_public:false` is authoritative and free.** Those books answer
+   `404 {"message":"script not found","statusCode":404}` (47 bytes), so they are classified `closed`
+   with **no request spent**. A missing route answers Express's `Cannot GET …` (85 bytes) instead —
+   the two 404s are distinguishable, and a **public** ref that 404s is a `failed`/`script-denied`,
+   never `closed`.
+2. **There is no script catalogue**: `GET /hampter/scripts` → `Cannot GET`. Books can only be
+   discovered from a card's detail, one request per card.
+3. **The ref already carries the description**, so Glaze's extra fetch of `/scripts/{id}` (and its
+   double-decoded `window.mbxM` store) is unnecessary here: one request per book, not two.
+4. **The scripted/JS shape is still UNMEASURED** — every `script` seen parsed as JSON. The detection
+   (non-JSON ⇒ source) is implemented defensively and must not be described as verified.
+
+Conversion target: the normalizer emits a **characterBook-shaped** book and the client pipes it through
+the host's own `convertCharacterBook` → `saveWorldInfo` (the chub path). SillyTavern's entry template
+stays the single source of truth; `saveWorldInfo` writes `data` to `/api/worldinfo/edit` as-is, so an
+entry hand-built from Glaze's field list would silently miss whatever ST adds next.
+
+*Status: pure logic DONE* (`janitorLorebookRefs`, `janitorScriptEntries`, `classifyJanitorLorebook`,
+`janitorScriptToCharacterBook`, `janitorLorebookName` in `src/endpoints/weavers-vault-janitor.js`;
+38 tests in `tests/vault/janitor-lorebook.test.js`, suite at 259). Route `POST /janitor/lorebooks`,
+client wiring and the on-disk import verification remain.
+
 **S9 — Ledger and errors.** Every import lands in the existing `ledger`; every failure states a
 reason (`unproxyable`, `closed-capture-failed`, `challenge`, `signed-out`, `rate-limited`).
 

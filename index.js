@@ -19,8 +19,8 @@ import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldIn
 const IMG_CHUB = new URL('chub.png', import.meta.url).href;
 const IMG_SAUCEPAN = new URL('saucepan.svg', import.meta.url).href;
 const IMG_DATACAT = new URL('datacat.png', import.meta.url).href;
-const IMG_JANNY = new URL('janny.svg', import.meta.url).href;
-const IMG_JANITOR = new URL('janitor.svg', import.meta.url).href;
+const IMG_JANNY = new URL('janny.png', import.meta.url).href;
+const IMG_JANITOR = new URL('janitor.png', import.meta.url).href;
 
 // Window-chrome glyphs, drawn inline to match Glaze's Material icons
 // (`Icons.crop_square_rounded` / `Icons.fullscreen_exit_rounded`) instead of
@@ -462,6 +462,12 @@ function searchRequest() {
         const params = new URLSearchParams();
         params.set('page', String(state.page || 1));
         params.set('sort', state.sort);
+        // The listing has its own SWF/NSFW switch and honours nothing else: with
+        // the sheet's "Show NSFW" off, the request must say `mode=sfw` (measured
+        // 2026-11-26: without it the grid filled with NSFW cards while the toggle
+        // read off, because the client never sent the parameter the server already
+        // supports).
+        params.set('mode', f.nsfw ? 'all' : 'sfw');
         // A pasted link is not a phrase. Leaving it in the box must not turn the
         // grid into "search for this URL", which is how the first live run of S7
         // returned "No results" while the box looked empty.
@@ -647,21 +653,23 @@ function chipHtml(tag) {
 function renderGrid() {
     const grid = root.querySelector('.wv-grid');
     grid.innerHTML = '';
-    const nsfwOn = state.filters?.nsfw;
     for (const item of state.items) {
+        // "Show NSFW" is a promise, not a hint: a provider that ignores its own
+        // SFW switch (JanitorAI returns SFW-mode listings that still carry
+        // NSFW-rated rows, measured 2026-11-26) must not put one on screen while
+        // the toggle reads off. Items without a rating flag are always shown.
+        if (item.nsfw && !state.filters?.nsfw) continue;
         const card = document.createElement('article');
         card.className = 'wv-card';
-        const blur = item.nsfw && !nsfwOn;
         const tags = item.tags ?? [];
         const chips = [
             `<span class="wv-chip ${item.nsfw ? 'wv-c-nsfw' : 'wv-c-sfw'}">${item.nsfw ? 'NSFW' : 'SFW'}</span>`,
             ...tags.slice(0, 8).map(t => chipHtml(`#${t}`)),
         ].join('');
         card.innerHTML = `
-            <div class="wv-art ${blur ? 'wv-blur' : ''}">
+            <div class="wv-art">
                 <img loading="lazy" referrerpolicy="no-referrer" alt="" />
                 <div class="wv-ph"></div>
-                ${blur ? '<button class="wv-reveal" title="Reveal">👁</button>' : ''}
                 <span class="wv-chat"><span class="fa-regular fa-envelope"></span><span class="wv-chat-n">${item.chatCount ? fmtCount(item.chatCount) : ''}</span></span>
             </div>
             <div class="wv-info">
@@ -676,13 +684,6 @@ function renderGrid() {
         img.src = item.avatarUrl || '';
         card.querySelector('.wv-ph').textContent = (item.name || '?')[0].toUpperCase();
         img.addEventListener('error', () => { img.remove(); card.querySelector('.wv-art').classList.add('wv-noimg'); });
-        if (blur) {
-            card.querySelector('.wv-reveal')?.addEventListener('click', e => {
-                e.stopPropagation();
-                card.querySelector('.wv-art').classList.remove('wv-blur');
-                card.querySelector('.wv-reveal').remove();
-            });
-        }
         const name = card.querySelector('.wv-card-name');
         name.textContent = item.name;
         name.title = item.name;
@@ -1491,61 +1492,42 @@ const DETAIL_PROMPT_SECTIONS = [
  * import, and the sheet says exactly that instead of showing blank blocks. The
  * import button is absent rather than disabled: a dead button invites clicking.
  */
+/**
+ * A closed JanitorAI card, rendered by the *same* window as every other source.
+ *
+ * This used to be a second renderer — a bare pane with a lock note, a bio block
+ * and a Recover button — which is why a JanitorAI card looked like a different
+ * product from a chub one. There is now one window: hero, tab strip, prompt-block
+ * drawers, FAB. A closed card changes the *data*, not the layout: the definition
+ * is what is missing, so the FAB recovers instead of importing, and the site's
+ * public bio stands in for the body inside the Description drawer.
+ * @param {HTMLElement} popup
+ * @param {object} item
+ * @param {object} report the `/janitor/card` payload with `needsCapture`
+ */
 function renderDetailClosed(popup, item, report) {
     const row = report?.row ?? {};
-    const reason = janitorBlockMessage(report);
-    // S6: the bio is HTML on the site and keeps its formatting. The server
-    // converts it with the same module that fills `creator_notes` and sends the
-    // result as `bioHtml` — one implementation, and it strips classes, inline
-    // hazards and anything executable, so rendering it here is safe. The credit
-    // line belongs to the stored card, not to this preview.
     const bioHtml = String(report?.bioHtml ?? '');
-    const bio = String(row.blurb ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    const tags = [...(row.tags ?? []), ...(row.customTags ?? [])].filter(Boolean).slice(0, 8);
-    popup.innerHTML = `
-        <div class="wv-dwin">
-            <div class="wv-dwinbar">
-                <div class="wv-sheettitle"></div>
-                <button class="wv-winbtn wv-dmax" title="Maximize">${ICON_MAXIMIZE}</button>
-                <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
-            </div>
-            <div class="wv-dscroll">
-                <div class="wv-dpane wv-dpane-info">
-                    <div class="wv-heroname">${escapeHtml(row.name || 'Untitled')}</div>
-                    ${row.creator ? `<div class="wv-heroauthor">@${escapeHtml(row.creator)}</div>` : ''}
-                    <div class="wv-dclosednote">
-                        <span class="fa-solid fa-lock wv-derricon"></span>
-                        <div>${escapeHtml(reason)}</div>
-                    </div>
-                    <div class="wv-dtagwrap">${tags.map(detailTagChip).join('')}</div>
-                    ${bioHtml ? `
-                        <div class="wv-dseclabel">Public bio</div>
-                        <div class="wv-bio wv-biohtml">${bioHtml}</div>` : (bio ? `
-                        <div class="wv-dseclabel">Public bio</div>
-                        <div class="wv-bio">${escapeHtml(bio)}</div>` : '')}
-                    <div class="wv-dseclabel">Recover</div>
-                    <div class="wv-recover">
-                        <div class="wv-recovernote">
-                            JanitorAI will assemble this card's own text for your account and hand it back.
-                            It runs in the JanitorAI window and takes a minute or two; your account settings
-                            are restored afterwards.
-                        </div>
-                        <button class="wv-recoverbtn" type="button">
-                            <span class="fa-solid fa-wand-magic-sparkles"></span>
-                            <span>Recover definition</span>
-                        </button>
-                        <div class="wv-recoverstatus" hidden></div>
-                    </div>
-                    <div class="wv-dspacer"></div>
-                </div>
-            </div>
-        </div>`;
-    const close = () => { popup.hidden = true; };
-    wireWinChrome(popup, close);
-    popup.querySelector('.wv-dclose').addEventListener('click', close);
-    const recoverButton = popup.querySelector('.wv-recoverbtn');
-    const recoverStatus = popup.querySelector('.wv-recoverstatus');
-    recoverButton.addEventListener('click', () => recoverJanitorCard(item, popup, recoverButton, recoverStatus));
+    const bioText = bioHtml || String(row.blurb ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const closedItem = { ...item, avatarUrl: item?.avatarUrl || row.avatar || '' };
+    const character = {
+        data: {
+            name: row.name || item?.name || 'Untitled',
+            creator: row.creator || '',
+            tags: [...(row.tags ?? []), ...(row.customTags ?? [])].filter(Boolean).slice(0, 8),
+            creator_notes: bioText,
+            description: '',
+            personality: '',
+            scenario: '',
+            first_mes: '',
+            extensions: { vault_source: 'janitor' },
+        },
+    };
+    renderDetail(popup, closedItem, character, {
+        closed: true,
+        reason: janitorBlockMessage(report),
+        bioHtml,
+    });
 }
 
 /**
@@ -1601,10 +1583,10 @@ async function recoverJanitorCard(item, popup, button, status) {
     }
 }
 
-function renderDetail(popup, item, character) {
+function renderDetail(popup, item, character, report = {}) {
     const d = character.data;
     const name = d.name || '?';
-    const book = d.character_book;
+    const closed = Boolean(report?.closed);
     // Glaze's Info tab reads `character.creatorNotes` (_InfoTab:1492), i.e. the
     // card's storefront/creator notes — NOT the card body. The body is the
     // Description block inside the Prompt Blocks tab. Rendering `description`
@@ -1612,7 +1594,17 @@ function renderDetail(popup, item, character) {
     const bioText = String(d.creator_notes ?? '').trim();
     // A janitor card's notes are converted bio HTML (janitor-html.js, sanitised);
     // every other source's notes are plain text and stay escaped.
-    const isHtml = d.extensions?.vault_source === 'janitor' && /^<(div|p|h[1-6]|ul|ol|blockquote)/i.test(bioText);
+    const isHtml = d.extensions?.vault_source === 'janitor' && /^<(div|p|h[1-6]|ul|ol|blockquote)\b/i.test(bioText);
+    // What the Description drawer holds: the card's own body when it has one,
+    // otherwise the site's public bio — a closed JanitorAI card has no body, and
+    // the bio is the only prose the site will give us.
+    const bioHtml = String(report?.bioHtml ?? '') || (isHtml ? bioText : '');
+    const descriptionBody = d.description
+        ? escapeHtml(d.description).replace(/\n/g, '<br>')
+        : (bioHtml || (bioText ? escapeHtml(bioText).replace(/\n/g, '<br>') : ''));
+    // One accordion list for every source; the Description row is filled from
+    // whichever of the two above exists, so the drawer never renders empty.
+    const sections = DETAIL_PROMPT_SECTIONS.filter(([key]) => (key === 'description' ? Boolean(descriptionBody) : Boolean(d[key])));
     const greetings = [d.first_mes, ...(d.alternate_greetings ?? [])].filter(g => g && g.trim());
 
     popup.innerHTML = `
@@ -1624,7 +1616,7 @@ function renderDetail(popup, item, character) {
             </div>
             <div class="wv-dscroll">
                 <div class="wv-hero">
-                    <img class="wv-heroimg ${item.nsfw && !(state.filters?.nsfw) ? 'wv-blurred' : ''}" src="${escapeHtml(item.avatarUrl || '')}" referrerpolicy="no-referrer" alt="" />
+                    <img class="wv-heroimg" src="${escapeHtml(item.avatarUrl || '')}" referrerpolicy="no-referrer" alt="" />
                     <div class="wv-heroscrim"></div>
                     <div class="wv-dheadbtns">
                         <button class="wv-dhbtn wv-dback" title="Back"><span class="fa-solid fa-arrow-left"></span></button>
@@ -1654,20 +1646,25 @@ function renderDetail(popup, item, character) {
                 </div>
                 <div class="wv-dpanewrap">
                     <div class="wv-dpane wv-dpane-info">
+                        ${closed ? `
+                            <div class="wv-dclosednote">
+                                <span class="fa-solid fa-lock wv-derricon"></span>
+                                <div>${escapeHtml(report.reason ?? '')}</div>
+                            </div>` : ''}
                         <div class="wv-dtagwrap">${(d.tags ?? []).slice(0, 8).map(detailTagChip).join('')}</div>
-                        ${bioText ? `
+                        ${closed ? '' : (bioText ? `
                             <div class="wv-dseclabel">Description</div>
                             <div class="wv-bio">${escapeHtml(bioText).replace(/\n/g, '<br>')}</div>`
-                            : ((d.tags ?? []).length ? '' : '<div class="wv-dnoprev">No preview available</div>')}
+                            : ((d.tags ?? []).length ? '' : '<div class="wv-dnoprev">No preview available</div>'))}
                     </div>
                     <div class="wv-dpane wv-dpane-prompts" hidden>
-                        ${DETAIL_PROMPT_SECTIONS.filter(([k]) => d[k]).map(([k, label], i) => `
+                        ${sections.map(([k, label]) => `
                             <div class="wv-acc ${k === 'description' ? 'open' : ''}">
                                 <button class="wv-acchead">
                                     <span class="wv-acclabel">${label}</span>
                                     <span class="fa-solid fa-chevron-up wv-accchev"></span>
                                 </button>
-                                <div class="wv-accbody">${escapeHtml(d[k]).replace(/\n/g, '<br>')}</div>
+                                <div class="wv-accbody${k === 'description' && bioHtml && !d.description ? ' wv-biohtml' : ''}">${k === 'description' ? descriptionBody : escapeHtml(d[k]).replace(/\n/g, '<br>')}</div>
                             </div>`).join('')}
                         ${greetings.length ? `
                             <div class="wv-acc ${greetings.length === 1 ? 'open' : ''}">
@@ -1694,10 +1691,11 @@ function renderDetail(popup, item, character) {
                     <div class="wv-dspacer"></div>
                 </div>
             </div>
-            <button class="wv-dfab">
-                <span class="fa-solid fa-download wv-dfabicon"></span>
-                <span class="wv-dfablabel">Import to library</span>
+            <button class="wv-dfab${closed ? ' wv-dfab-recover' : ''}">
+                <span class="fa-solid ${closed ? 'fa-wand-magic-sparkles' : 'fa-download'} wv-dfabicon"></span>
+                <span class="wv-dfablabel">${closed ? 'Recover definition' : 'Import to library'}</span>
             </button>
+            ${closed ? '<div class="wv-recoverstatus" hidden></div>' : ''}
         </div>`;
 
     const win = popup.querySelector('.wv-dwin');
@@ -1740,11 +1738,8 @@ function renderDetail(popup, item, character) {
         if (old) { old.remove(); return; }
         const pop = document.createElement('div');
         pop.className = 'wv-dpopup';
-        const heroImg = popup.querySelector('.wv-heroimg');
-        const blurred = heroImg?.classList.contains('wv-blurred');
-        pop.innerHTML = `
-            <button class="wv-dpoprow" data-act="source"><span class="fa-solid fa-arrow-up-right-from-square"></span>Open source site</button>
-            ${blurred ? '<button class="wv-dpoprow" data-act="unblur"><span class="fa-solid fa-eye"></span>Unblur NSFW</button>' : ''}`;
+        const heroImg = popup.querySelector('.wv-heroimg');        pop.innerHTML = `
+            <button class="wv-dpoprow" data-act="source"><span class="fa-solid fa-arrow-up-right-from-square"></span>Open source site</button>`;
         win.appendChild(pop);
         const btn = popup.querySelector('.wv-dkebab').getBoundingClientRect();
         const winRect = win.getBoundingClientRect();
@@ -1756,9 +1751,7 @@ function renderDetail(popup, item, character) {
         pop.style.left = `${x}px`;
         pop.style.top = `${y}px`;
         pop.querySelectorAll('.wv-dpoprow').forEach(b => b.addEventListener('click', () => {
-            if (b.dataset.act === 'unblur') {
-                heroImg?.classList.remove('wv-blurred');
-            } else if (item.source === 'saucepan') {
+            if (item.source === 'saucepan') {
                 window.open(`https://saucepan.ai/companion/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             } else if (item.source === 'datacat') {
                 window.open(`https://datacat.run/characters/${encodeURIComponent(item.id)}`, '_blank', 'noopener');
@@ -1777,11 +1770,18 @@ function renderDetail(popup, item, character) {
     });
 
     // Import FAB → mode sheet when lorebooks exist, straight import otherwise.
-    popup.querySelector('.wv-dfab').addEventListener('click', () => {
+    // A closed card has nothing to import, so the same slot recovers the
+    // definition instead (same window, same position, different action).
+    const fab = popup.querySelector('.wv-dfab');
+    if (closed) {
+        fab.addEventListener('click', () => recoverJanitorCard(item, popup, fab, popup.querySelector('.wv-recoverstatus')));
+        return;
+    }
+    fab.addEventListener('click', () => {
         if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
         if (item.source === 'janny') { importJannyCharacter(item, character); return; }
         if (item.source === 'janitor') { importJanitorCard(item, character); return; }
-        if (book) showImportModeSheet(item, character);
+        if (d.character_book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
 }

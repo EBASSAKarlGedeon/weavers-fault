@@ -610,3 +610,76 @@ re-derive a user-facing reason from a code at the consumer when the producer alr
 **Check.** Paste `https://janitorai.com/characters/00000000-0000-4000-8000-000000000001`: the new
 ledger line must read `"reason":"missing"`, not `"reason":"janitor_missing"`. Measured after the
 fix: `{"source":"janitor","id":"00000000-…-000000000001","what":"blocked","reason":"missing"}`.
+
+## 33. A filter the UI shows but the request never sends is not a filter
+
+**Symptom.** With the filter sheet's "Show NSFW" switch off, the JanitorAI grid filled with
+NSFW-rated cards. The same switch worked for chub, janny and datacat, so it looked like a site
+problem.
+
+**Measured cause.** The switch is only ever a value in `state.filters`; each provider turns it into
+its own parameter. chub and datacat put `nsfw: f.nsfw` in a JSON body, but the janitor branch of
+`searchRequest()` built the query string from `page`, `sort`, `search` and `tags[]` only, while the
+server route *did* accept `mode` (`/janitor/search` → `janitorSearchUrl({ mode })`, `'sfw'` vs
+`'all'`). Measured through the page's own fetch recorder, every request read
+`…&mode=all&…` regardless of the switch, and the site obligingly returned 34 cards, all NSFW.
+
+**Rule.** A filter is only real when the request carries it. When a provider has its own switch
+name (`mode=sfw`), the provider branch that builds the request owns that translation, and the
+route's whitelist must have a test proving the value survives. Guard the *rendering* too: "Show
+NSFW off" is a promise about what is on screen, so `renderGrid()` drops `item.nsfw` rows for every
+source instead of trusting each provider's filter (a site's "SFW mode" can still list NSFW-rated
+bots).
+
+**Check.** With the switch off, the recorded URL must contain `mode=sfw` and the grid must contain
+zero `.wv-c-nsfw` chips; with it on, the same search must read `mode=all` and the rows must come
+back. Measured 2026-11-26: off → `mode=sfw`, 6 cards / 0 NSFW; on → `mode=all`, 34 cards / 34 NSFW.
+
+## 34. A control character written into a regex compiles and never matches
+
+**Symptom.** A JanitorAI card's bio in the detail window showed literal `<p>` tags and stick-together
+paragraphs, while the same text rendered correctly elsewhere. Nothing threw.
+
+**Measured cause.** The guard that decides "this string is HTML" was
+
+```js
+/^<(div|p|h[1-6]|ul|ol|blockquote)\b/i.test(bioText)
+```
+
+with `\b` written as a raw `0x08` byte (a backspace) instead of the two characters `\` `b`. A
+literal backspace never follows `>` in the converted bio, so `isHtml` was always `false` and the
+text took the escape-only branch. `node --check` is happy: it is a valid regex.
+
+**Rule.** `\b`, `\t`, `\n` inside a *regex literal* are two characters on purpose; never let a
+`\x08`/`\x0b` reach a source file through a heredoc or a tool that interprets escapes. When a
+boolean guard "never fires", measure the guard's own value in the page before reading the branch
+below it.
+
+**Check.** `grep -c $'\x08' index.js` must be `0`; a janitor card's Description drawer must contain
+real `<p>` elements (`wv-biohtml` + `strong` count > 0), not escaped tags.
+
+## 35. A revealed window keeps the taskbar button that reveal() was supposed to remove
+
+**Symptom.** A Chrome icon sat in the Windows taskbar for minutes "while using JanitorAI" in the
+vault, even though the automation window was supposed to be invisible. Closing the vault made it
+disappear, which is why it kept being reported as "still not patched".
+
+**Measured cause.** `start()` applies `WS_EX_TOOLWINDOW` and clears `WS_EX_APPWINDOW`, which is
+what removes the taskbar button. `reveal()` — the human step for sign-in and the persona wall —
+deliberately reverses that so the window behaves like a normal one, and sets `taskbarHidden =
+false`. The only code that ever put the style back was `release() → park()`, and `release()` returns
+early while a **sticky** hold is live (the persona wall holds for 20 minutes). Measured on the live
+window: idle `ex=0x00200180` (`tool=True app=False`), after `POST /janitor/browser/focus`
+`ex=0x00240100` (`tool=False app=True`) — a taskbar button, with nothing to remove it until the hold
+expired.
+
+**Rule.** The window being on screen and the window having a taskbar button are separate concerns;
+`reveal()` must satisfy only the first. `hideWindow()` restyles without moving or hiding, so call it
+at the end of every reveal (and once more ~1.5 s later, because the shell can add the button a beat
+after the window is shown). A human-facing window stays usable: it is placed, raised and focused, it
+is simply not in the taskbar.
+
+**Check.** `POST /api/weavers-vault/janitor/browser/focus`, then read the window's `GWL_EXSTYLE`:
+`tool=True app=False vis=True`. The window must still paint — a desktop capture must show the site,
+not a blank surface (`WS_EX_APPWINDOW`/`SetWindowPos` frame changes can strand a stale surface, which
+is why the check includes looking at it, not just the bit).

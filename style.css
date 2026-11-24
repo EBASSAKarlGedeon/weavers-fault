@@ -618,22 +618,7 @@
     display: grid;
 }
 
-/* NSFW blur (ImageFiltered sigma 16) */
-.wv-blur img {
-    filter: blur(16px);
-    transform: scale(1.06);
-}
-
-.wv-reveal {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    display: grid;
-    place-items: center;
-    font-size: 22px;
-    color: #fff;
-    background: rgba(0, 0, 0, 0.25);
-}
+/* Artwork is never blurred: NSFW covers are shown as-is (user decision, 2026-11-26). */
 
 /* Message badge: black@60%, r10, mail icon 12 white70, count 10/600 */
 .wv-chat {
@@ -1529,11 +1514,6 @@
     object-position: top center;
 }
 
-.wv-heroimg.wv-blurred {
-    filter: blur(16px);
-    transform: scale(1.05);
-}
-
 .wv-heroscrim {
     position: absolute;
     inset: 0;
@@ -2120,40 +2100,21 @@
     color: #ffc454;
 }
 
-/* Closed-card recovery: the one action a closed JanitorAI card can offer. */
-.wv-recover {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-    margin: 6px 0 4px;
+/* Closed-card recovery uses the standard detail window: the FAB slot becomes
+   the recovery action and its status floats just above that FAB, so a closed
+   card never gets a second, different-looking sheet. */
+.wv-dwin > .wv-recoverstatus {
+    position: absolute;
+    right: 16px;
+    bottom: 84px;
+    max-width: min(380px, calc(100% - 32px));
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: var(--wv-bg);
+    border: 1px solid var(--wv-ov);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+    text-align: right;
 }
-
-.wv-recovernote {
-    font-size: 13px;
-    line-height: 1.45;
-    color: var(--wv-on-var);
-    opacity: 0.85;
-}
-
-.wv-recoverbtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    height: 40px;
-    padding: 0 18px;
-    border-radius: 20px;
-    background: var(--wv-accent);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    font-size: 14px;
-    font-weight: 700;
-}
-
-.wv-recoverbtn:disabled {
-    opacity: 0.55;
-}
-
 .wv-recoverstatus {
     font-size: 13px;
     line-height: 1.45;

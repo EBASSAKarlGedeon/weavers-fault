@@ -311,8 +311,24 @@ Noted, not a defect: typing a *non*-JanitorAI URL into the JanitorAI search box 
 does not call the import path (the input handler guards on `parseJanitorIdLocal`), so the `bad-id`
 reason there is defensive rather than reachable by typing.
 
-Still open: the ledger has no UI view — it lives in extension settings and is read by the
-duplicate-import warning; a history sheet is a UI decision, not part of this contract.
+**S9 UI — Import history (done 2026-11-26).** The button is the clock in the browse toolbar's right
+cluster, immediately left of the filter funnel: `[Source ▾] … [history] [filters] [sort]`. It opens
+the same floating window as the filter sheet (`min(92vw, 640)` × 85dvh, r16) with the sheet's own
+padding rhythm — 16px card gutters, 14/16 row padding, 20px card radius — and one row per ledger
+line: source pill, name, `what` + when, the reason in the error colour when there is one, and a
+link to the source page. Newest first. Clear is a two-press button (arm, then delete within 3 s)
+rather than a `confirm()`.
+
+Measured in a real browser: desktop 621×656 at (330, 70), card margin `0px 16px`, row padding
+`14px 16px`, 5 rows; 390×844 sheet 374×776 at y=34 with the reason wrapping onto its own line and
+no clipping. A name-less row (a 404 has only an id) renders the id in monospace with the full value
+in `title`, so it cannot be mistaken for a character called "00000000-…".
+
+Two measurement notes worth keeping: the sheet measured at **y = −388** when the device metrics
+were switched *while it was already open* (PITFALLS #12's zero-height `html` showing up as an
+emulation artefact, not a CSS fault — set the metrics first, then open); it carries an explicit
+`100dvh` height anyway. The 7 px horizontal overflow at 390 px is the host's, measured with the
+vault closed, as S7 recorded.
 
 ## 5. Test matrix
 

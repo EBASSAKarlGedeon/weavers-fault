@@ -225,6 +225,9 @@ function ensureOverlay() {
                     <img class="wv-srclogo" src="${IMG_CHUB}" alt="" width="18" height="18" /><span class="wv-srclabel">Chub</span><span class="fa-solid fa-chevron-down wv-dn"></span>
                 </button>
                 <div class="wv-right">
+                    <button class="wv-iconbtn wv-ledgerbtn" title="Import history" aria-label="Import history">
+                        <span class="fa-solid fa-clock-rotate-left"></span>
+                    </button>
                     <button class="wv-iconbtn wv-filterbtn" title="Filters" aria-label="Filters">
                         <span class="fa-solid fa-bars-staggered"></span>
                         <span class="wv-badge" hidden></span>
@@ -312,6 +315,19 @@ function ensureOverlay() {
                     </div>
                 </div>
             </div>
+
+            <!-- Import history (Q4): the ledger every import and every refusal lands in. -->
+            <div class="wv-ledger-overlay" hidden>
+                <div class="wv-modal">
+                    <div class="wv-sheetbar">
+                        <span class="wv-sheettitle">Import history</span>
+                        <span class="wv-spacer"></span>
+                        <button class="wv-winbtn wv-lclear" title="Clear history" aria-label="Clear history"><span class="fa-solid fa-trash-can"></span></button>
+                        <button class="wv-winbtn wv-lclose" title="Close" aria-label="Close import history"><span class="fa-solid fa-xmark"></span></button>
+                    </div>
+                    <div class="wv-sheetbody wv-ledgerbody"></div>
+                </div>
+            </div>
         </div>
     `;
     document.body.appendChild(root);
@@ -322,6 +338,8 @@ function ensureOverlay() {
 
 function onKeydown(e) {
     if (!root || root.hidden || e.key !== 'Escape') return;
+    const ledger = root.querySelector('.wv-ledger-overlay');
+    if (ledger && !ledger.hidden) { closeLedgerSheet(); return; }
     const overlay = root.querySelector('.wv-filters-overlay');
     if (!overlay.hidden) { closeFilterSheet(); return; }
     closeVault();
@@ -827,6 +845,36 @@ function wireToolbar() {
     // Filter sheet (floating window; filters commit on close, like Glaze)
     const overlay = root.querySelector('.wv-filters-overlay');
     root.querySelector('.wv-filterbtn').addEventListener('click', () => openFilterSheet());
+    root.querySelector('.wv-ledgerbtn').addEventListener('click', () => openLedgerSheet());
+    root.querySelector('.wv-lclose').addEventListener('click', closeLedgerSheet);
+    root.querySelector('.wv-ledger-overlay').addEventListener('click', e => {
+        if (e.target === e.currentTarget) closeLedgerSheet();
+    });
+    // Two presses, not a browser confirm(): the first arms the button, the
+    // second clears. A history is cheap to lose but pointless to lose by accident.
+    root.querySelector('.wv-lclear').addEventListener('click', event => {
+        const button = event.currentTarget;
+        if (button.dataset.armed !== 'true') {
+            button.dataset.armed = 'true';
+            button.classList.add('wv-armed');
+            button.title = 'Press again to clear the whole history';
+            setTimeout(() => {
+                if (button.dataset.armed === 'true') {
+                    button.dataset.armed = 'false';
+                    button.classList.remove('wv-armed');
+                    button.title = 'Clear history';
+                }
+            }, 3000);
+            return;
+        }
+        button.dataset.armed = 'false';
+        button.classList.remove('wv-armed');
+        button.title = 'Clear history';
+        settings().ledger = [];
+        saveSettingsQuiet();
+        renderLedger();
+    });
+    root.querySelector('.wv-ledgerbtn').addEventListener('click', () => openLedgerSheet());
     root.querySelector('.wv-mclose').addEventListener('click', () => closeFilterSheet());
     root.querySelector('.wv-fmax').addEventListener('click', () => {
         const modal = root.querySelector('.wv-modal');
@@ -1866,6 +1914,127 @@ function failureReason(source, status = 0) {
 /** A ledger item for a failure with no imported character behind it. */
 function ledgerItemFor(source, id, name = '') {
     return { source, fullPath: String(id ?? ''), id: String(id ?? ''), name: String(name ?? '') };
+}
+
+/** What a ledger row says it did, in words (`what` is a compact token). */
+const LEDGER_WHAT_LABELS = {
+    character: 'Character',
+    'character+lorebook': 'Character + lorebook',
+    lorebook: 'Lorebook',
+    lorebooks: 'Lorebooks',
+    blocked: 'Not imported',
+    capture: 'Definition recovery',
+};
+
+/**
+ * The reason tokens from `JANITOR_FAILURE_REASONS` (and the local ones), as a
+ * reader can act on them. A raw token in the UI would be honest but useless.
+ */
+const LEDGER_REASON_LABELS = {
+    unproxyable: 'the creator turned the proxy off',
+    private: 'private',
+    deleted: 'deleted',
+    missing: 'no such character on the site',
+    'no-definition': 'the site hides its definition',
+    'closed-capture-failed': 'the definition recovery failed',
+    'profile-required': 'JanitorAI wants a persona first',
+    challenge: 'a browser check did not finish',
+    'signed-out': 'not signed in',
+    'rate-limited': 'rate limited',
+    transport: 'the request never completed',
+    'no-browser': 'no browser to drive',
+    unparseable: 'the site answered something unexpected',
+    server: 'the site returned an error',
+    'bad-id': 'that is not a link this source understands',
+    'no-extract': 'the extraction data was gone',
+    'import-failed': 'Loreweaver could not write the card',
+    'save-failed': 'the lorebook could not be saved',
+    'script-denied': 'the site refused the lorebook',
+    'script-missing': 'the lorebook endpoint is gone',
+    'no-entries': 'the lorebook is empty',
+};
+
+/** A ledger timestamp as "12 min ago" / "8 Aug, 18:57". */
+function ledgerWhen(at) {
+    const date = new Date(Number(at) || 0);
+    if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '';
+    const minutes = Math.round((Date.now() - date.getTime()) / 60_000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} h ago`;
+    const sameYear = date.getFullYear() === new Date().getFullYear();
+    return `${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: sameYear ? undefined : 'numeric' })}, ${date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/**
+ * The ledger, newest first.
+ *
+ * Every import and every refusal lands here (S9), so this is the one place a
+ * user can answer "did I already import this?" and "why didn't that one work?"
+ * after the toast has gone. Rows carry the source, what happened, when, the
+ * reason when there is one, and a link to the source page.
+ */
+function renderLedger() {
+    const body = root.querySelector('.wv-ledgerbody');
+    if (!body) return;
+    const entries = [...(settings().ledger ?? [])]
+        .sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+    if (!entries.length) {
+        body.innerHTML = `<div class="wv-ledger-empty">
+            <span class="fa-solid fa-clock-rotate-left"></span>
+            <p>Nothing yet.</p>
+            <p class="wv-ledger-hint">Every character and lorebook you import lands here — and so does every attempt that failed, with the reason.</p>
+        </div>`;
+        return;
+    }
+    const rows = entries.map(entry => {
+        const source = String(entry.source ?? 'chub');
+        const label = SOURCE_META[source]?.label ?? source;
+        const failed = Boolean(entry.reason);
+        const what = LEDGER_WHAT_LABELS[entry.what] ?? entry.what ?? '';
+        const reason = failed ? (LEDGER_REASON_LABELS[entry.reason] ?? entry.reason) : '';
+        // A refusal often has no name — a 404 has only an id. Showing that id in
+        // the title style would read as a character called "00000000-…", so it
+        // gets the identifier treatment instead (and carries the full value in
+        // `title`, which is also what a copy needs).
+        const named = Boolean(String(entry.name ?? '').trim());
+        const name = String(named ? entry.name : (entry.id || '(unnamed)'));
+        const nameClass = named ? 'wv-lname' : 'wv-lname wv-lid';
+        return `<div class="wv-lrow">
+            <span class="wv-lsrc" data-source="${escapeHtml(source)}">${escapeHtml(label)}</span>
+            <div class="wv-lmain">
+                <div class="${nameClass}" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                <div class="wv-lmeta">
+                    <span class="wv-lwhat${failed ? ' wv-lfail' : ''}">${escapeHtml(what)}</span>
+                    <span class="wv-ldot">·</span>${escapeHtml(ledgerWhen(entry.at))}
+                    ${failed ? `<span class="wv-ldot">·</span><span class="wv-lreason">${escapeHtml(reason)}</span>` : ''}
+                </div>
+            </div>
+            ${entry.url ? `<a class="wv-llink" href="${escapeHtml(entry.url)}" target="_blank" rel="noopener noreferrer" title="Open source page"><span class="fa-solid fa-arrow-up-right-from-square"></span></a>` : ''}
+        </div>`;
+    }).join('');
+    body.innerHTML = `<section class="wv-mcard wv-lcard">
+        <div class="wv-mhead2">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</div>
+        ${rows}
+    </section>`;
+}
+
+function openLedgerSheet() {
+    const overlay = root.querySelector('.wv-ledger-overlay');
+    if (!overlay) return;
+    renderLedger();
+    overlay.hidden = false;
+    const clear = overlay.querySelector('.wv-lclear');
+    // Disarm a half-pressed Clear when the sheet is opened fresh.
+    clear.dataset.armed = 'false';
+    clear.classList.remove('wv-armed');
+    clear.title = 'Clear history';
+}
+
+function closeLedgerSheet() {
+    const overlay = root.querySelector('.wv-ledger-overlay');
+    if (overlay) overlay.hidden = true;
 }
 
 // ─── Provider switch (M4) ────────────────────────────────────────────────────

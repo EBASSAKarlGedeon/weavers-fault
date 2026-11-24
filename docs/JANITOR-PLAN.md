@@ -115,6 +115,18 @@ account's preset, source and `context_length` equal the pre-flight values; the c
 persona is gone. Then the **kill test**: kill the server mid-capture, restart, and `/janitor/status`
 reports the account dirty with the exact diff, and `POST /janitor/account/restore` puts it back.
 
+*Status (in progress, nothing committed yet).* Built and measured: the account snapshot/restore with
+durable pre-flight state, the `janitor_separate.dart` port, the vendored capture page script, and the
+drive. Six defects were found by measurement, each written up in `PITFALLS.md`:
+`__glazeSend` never installed because `Page.enable` was missing (#18); the ported WebView send cannot
+work under CDP, so input is now trusted CDP input (#19); "the composer is empty" was a vacuous check
+that read the wrong textarea (#20); a fresh account cannot chat at all — JanitorAI wants a persona
+(#21); and a snapshot with null fields could never read clean (#22). Verified so far: the drive opens
+the chat, reloads for the preset, types and sends a **trusted** message (Send button goes
+`disabled` → enabled), and restores the account to `restored: true, diff: []` with the chat deleted.
+**Blocked on one human step:** the account in use has no persona, so the site refuses to generate; the
+capture answers `409 janitor_profile_required` and opens the window.
+
 **S6 — Bio converter.** Port `janitor2st.py` to `janitor-html.js`: `{user}`→`{{user}}` (never touching
 existing `{{…}}`), relative→absolute links, `/external-link?to=` decoding, `oklab()`→hex, dark
 `<mark>`→white text, `text: center`→`text-align`, `align=""`, `width:Npx`→`max-width:min(Npx,100%)`,

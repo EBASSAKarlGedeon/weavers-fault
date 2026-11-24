@@ -409,3 +409,65 @@ The token is **not** in `localStorage`. It is inside the chunked Supabase cookie
 **Rule.** A value derived from the active source gets **one** producer. `searchPlaceholder()` now answers for every source and both callers ask it. The same shape of bug is what produced the tag-vocabulary leak in `setSource()` (PITFALLS #13) — per-source state written in more than one place drifts.
 
 **Check.** For every provider, read the chip label and the placeholder together; they must describe the same source (verified: chub/saucepan/janitor each correct).
+
+## 18. `Page.addScriptToEvaluateOnNewDocument` does nothing unless `Page.enable` came first
+
+**Symptom.** The capture reached "sending probe" and died with `TypeError: window.__glazeSend is not a function`; a second run waited the full 60 s composer budget and reported "the composer never appeared". The page itself was fine and the script file parsed.
+
+**Measured cause.** The driver wrapped `Page.addScriptToEvaluateOnNewDocument` and got an identifier back — `{"identifier":"1"}` — so the call looked successful, but the script was never applied to the new document. On the same browser, same page, same script:
+
+| Call order | After `Page.reload()` |
+|---|---|
+| `addScriptToEvaluateOnNewDocument` alone | `typeof window.__glazeSend === "undefined"` |
+| `Page.enable`, then the same call | `__glazeHooked === true`, `typeof window.__glazeSend === "function"` |
+
+A trivial `window.__probe = 1` behaves identically, so this is the mechanism, not the vendored script. The CDP command is accepted either way — there is no error to notice.
+
+**Rule.** `VaultBrowser.addInitScript()` sends `Page.enable` before adding a script, every time (it is idempotent and cheap). "The call returned an identifier" is not evidence that the script will run.
+
+**Check.** After the next navigation, assert the script's own marker: `typeof window.__glazeSend === 'function'`. Never assume an injected script is live because the injection call resolved.
+
+## 19. A WebView-ported send is the wrong send under CDP
+
+**Symptom.** The message was typed into the composer (visible in a screenshot), the Send button never enabled, nothing was sent, and the capture waited out its full budget for a `/generateAlpha` request.
+
+**Measured cause.** Glaze's `_captureUserScript` types by calling `HTMLTextAreaElement.prototype`'s value setter and dispatching a synthetic `input` event, then clicks with `element.click()`. Inside a Flutter WebView that is the only option. Under CDP it is the wrong one: JanitorAI's editor never registers the edit, so `button[aria-label="Send"]` stayed `disabled=""` and the click was a no-op. Measured on the live chat page: after `Input.insertText` (a *trusted* insertion) the same button reads `disabled: false`.
+
+**Rule.** Use trusted input for anything a human would do: `Input.dispatchMouseEvent` for clicks and focus, `Input.insertText` for text, `Input.dispatchKeyEvent` for Enter. Keep the ported script only for what CDP cannot do from outside the page — hooking `fetch`/`XHR` to read the assembled prompt. `VaultBrowser` exposes `clickPoint`, `insertText`, `pressKey` for exactly this.
+
+**Check.** Type, then require two separate proofs: the text is in the field, and the Send button is enabled and its centre is hit by `elementFromPoint` before clicking.
+
+## 20. "The composer is empty" proves nothing — and reads the wrong composer
+
+**Symptom.** A capture reported the probe as sent, then timed out with "No /generateAlpha request left the page", while the failure screenshot showed the text still sitting in the composer.
+
+**Measured cause.** Three separate mistakes in one check, each of which alone makes the check vacuous:
+1. It verified "the last visible textarea is empty" — true before typing, so an untyped field passed.
+2. It picked the composer with `.pop()`. Measured on a live chat: two textareas are visible, and the last one is a 670×32 field at `y=0` whose centre is covered by `div._menuWrapper_*`, so `elementFromPoint` returns the menu. The real composer is `textarea._chatTextarea_*` at `(302,670)`, placeholder "Enter to send. Shift+Enter for linebreak."
+3. After a modal opens, the "last textarea" is the *modal's* empty field, so "cleared" was satisfied by the wrong element.
+
+**Rule.** Tag the exact element you typed into (`data-wv-composer="1"`), and read *that* back by attribute — never re-resolve "a composer" for verification. Prove the text arrived before sending, and prove it left after. A check that passes on an untouched page is not a check.
+
+**Check.** Walk the failure path deliberately: the diag must report the leftover character count of the tagged element, or `the composer disappeared`, never a bare "ok".
+
+## 21. A fresh JanitorAI account cannot chat at all
+
+**Symptom.** After the send worked, the page showed a **"Complete your profile"** modal (Persona Name + Appearance) over the chat, the message stayed in the composer, and no generation request of any kind left the page — only `POST /dustpan/v1/track → 202`.
+
+**Measured cause.** JanitorAI refuses to generate until the account has a persona. The account measured here had never set one (its `/hampter/api-settings` was empty too: `selected_proxy_config_id: null`, `source: null`, `generation_settings: null`). This is a site-side setup wall, not a capture defect, and it cannot be worked around by retrying. Glaze's persona endpoint (`/hampter/personas`) answers 404 on the current site, so there is no API to create one either.
+
+**Rule.** Detect the wall, do not retry it: visible `Complete your profile` text (or a `persona name` field) ⇒ the capture fails with `janitor_profile_required`, and the route **reveals the browser and holds it** so the human can fill the form. Filling it silently would mutate the user's account identity, which is theirs to choose.
+
+**Check.** With an account that has no persona, `POST /janitor/capture` must answer `409 janitor_profile_required` within seconds, with the window on screen, and leave `dirty: false` and no snapshot.
+
+## 22. A field the pre-flight snapshot never had can never read dirty
+
+**Symptom.** After capturing with a fresh account, `POST /janitor/account/restore` answered `restored: false` with `diff: [{"field":"source","expected":null,"actual":"janitor"},{"field":"generation_settings.context_length","expected":null,"actual":0}]`, and every later restore stayed dirty.
+
+**Measured cause.** The snapshot records what the account had. A fresh account has `source: null`, no selection and no `generation_settings` at all, so:
+- the diff compared `null` against the restored `'janitor'` and never matched;
+- the restore plan only patched `generation_settings` when a snapshot object existed, so a contextless account kept `context_length: 0` — the exact damage the restore exists to undo.
+
+**Rule.** Compare only what the snapshot actually recorded (`!== null`), and when there is no generation settings object at all, the restore target is `{ context_length: 4096 }` — "original plus a sane context" with no original. A `404` from deleting a capture preset means it is already gone, which is success.
+
+**Check.** `janitorAccountDiff(snapshot, api-settings)` for a fresh account must be `[]` after restore, and `janitorRestorePlan(...)` must carry `context_length: JANITOR_DEFAULT_CONTEXT_LENGTH` even with no snapshot settings.

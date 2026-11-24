@@ -128,3 +128,10 @@ a 403 after the browser dance.
 This section supersedes the "works without an account is asserted in a doc comment" caveat above for
 the three endpoints measured: they do answer anonymously. It does **not** prove they answer
 identically for every card, and it says nothing about rate limits.
+
+### Added 2026-11-24 (second probe, 5 requests)
+
+- `GET /hampter/tags` returns a **bare JSON array** (not `{data:[…]}`) of **53** tags with keys
+  `created_at, description, id, name, slug`; names carry emoji (`"👨 Male"`, slug `male`).
+- Sorts: `trending24`, `trending`, `latest`, and **`popular`** (= the site's "Popular all time",
+  `200`, 34 rows). `sort=all` is a `400` — the whitelist must reject it rather than forward it.

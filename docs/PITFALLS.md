@@ -471,3 +471,13 @@ A trivial `window.__probe = 1` behaves identically, so this is the mechanism, no
 **Rule.** Compare only what the snapshot actually recorded (`!== null`), and when there is no generation settings object at all, the restore target is `{ context_length: 4096 }` — "original plus a sane context" with no original. A `404` from deleting a capture preset means it is already gone, which is success.
 
 **Check.** `janitorAccountDiff(snapshot, api-settings)` for a fresh account must be `[]` after restore, and `janitorRestorePlan(...)` must carry `context_length: JANITOR_DEFAULT_CONTEXT_LENGTH` even with no snapshot settings.
+
+## 23. A status poll can close the window a human is filling
+
+**Symptom.** The capture answered `409 janitor_profile_required` and revealed the JanitorAI window on the "Complete your profile" form. Within half a minute the window was gone, mid-form.
+
+**Measured cause.** `GET /janitor/account` calls `browser.release()` when it finds a signed-in session — correct for the sign-in flow (hold while the login page is up, release when it worked), wrong here: a status poll arrived while a human was typing, cancelled the hold, and the 30 s idle teardown closed the browser. The reveal itself was fine; the hold was not durable against other requests.
+
+**Rule.** A hold taken for a human mid-task is *sticky*: `hold(ttlMs, { sticky: true })` can only be ended by its own deadline, and `release()` is a no-op while it lasts. The persona wall uses a sticky 20-minute hold.
+
+**Check.** Reveal the persona form, call `/janitor/account` twice, wait 40 s: the browser must still be running (measured: 0 chrome processes before the fix, alive after).

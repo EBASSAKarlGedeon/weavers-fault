@@ -1367,6 +1367,19 @@ function renderDetailClosed(popup, item, report) {
                     ${bio ? `
                         <div class="wv-dseclabel">Public bio</div>
                         <div class="wv-bio">${escapeHtml(bio)}</div>` : ''}
+                    <div class="wv-dseclabel">Recover</div>
+                    <div class="wv-recover">
+                        <div class="wv-recovernote">
+                            JanitorAI will assemble this card's own text for your account and hand it back.
+                            It runs in the JanitorAI window and takes a minute or two; your account settings
+                            are restored afterwards.
+                        </div>
+                        <button class="wv-recoverbtn" type="button">
+                            <span class="fa-solid fa-wand-magic-sparkles"></span>
+                            <span>Recover definition</span>
+                        </button>
+                        <div class="wv-recoverstatus" hidden></div>
+                    </div>
                     <div class="wv-dspacer"></div>
                 </div>
             </div>
@@ -1374,6 +1387,60 @@ function renderDetailClosed(popup, item, report) {
     const close = () => { popup.hidden = true; };
     wireWinChrome(popup, close);
     popup.querySelector('.wv-dclose').addEventListener('click', close);
+    const recoverButton = popup.querySelector('.wv-recoverbtn');
+    const recoverStatus = popup.querySelector('.wv-recoverstatus');
+    recoverButton.addEventListener('click', () => recoverJanitorCard(item, popup, recoverButton, recoverStatus));
+}
+
+/**
+ * Recover a closed JanitorAI definition.
+ *
+ * The route drives the site for a minute or two, so the button owns the wait and
+ * says how long it has been waiting rather than leaving a dead spinner. A profile
+ * wall is a real answer from the site (it will not generate without a persona),
+ * so it is shown as instructions — the server has already opened that window.
+ * @param {object} item
+ * @param {HTMLElement} popup
+ * @param {HTMLButtonElement} button
+ * @param {HTMLElement} status
+ */
+async function recoverJanitorCard(item, popup, button, status) {
+    if (!item?.fullPath) return;
+    const started = Date.now();
+    button.disabled = true;
+    status.hidden = false;
+    const tick = setInterval(() => {
+        status.textContent = `Recovering… ${Math.round((Date.now() - started) / 1000)}s (JanitorAI is generating)`;
+    }, 1_000);
+    status.textContent = 'Recovering… starting the JanitorAI window';
+    try {
+        const r = await fetch('/api/weavers-vault/janitor/capture', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ id: item.fullPath }),
+        });
+        const payload = await r.json();
+        if (!r.ok) {
+            status.textContent = payload?.error || `The capture answered ${r.status}`;
+            if (payload?.code === 'janitor_profile_required') {
+                button.querySelector('span:last-child').textContent = 'Retry after completing your profile';
+            }
+            toastr.error(status.textContent, "Weaver's Vault");
+            return;
+        }
+        const report = payload.report ?? {};
+        status.textContent = `Recovered ${report.descriptionChars ?? 0} characters. Importing…`;
+        const captured = new Map([[item.fullPath, payload.file]]);
+        await importJannyCharacter(item, payload.character, '/janitor/capture', captured);
+        status.textContent = `Recovered and imported: ${report.descriptionChars ?? 0} characters of definition, ${report.scenarioChars ?? 0} of scenario, ${report.closedLoreEntries ?? 0} hidden lore entries.`;
+    } catch (error) {
+        console.error(`[${extensionName}] janitor capture failed`, error);
+        status.textContent = error.message;
+        toastr.error(error.message, "Weaver's Vault capture failed");
+    } finally {
+        clearInterval(tick);
+        button.disabled = false;
+    }
 }
 
 function renderDetail(popup, item, character) {

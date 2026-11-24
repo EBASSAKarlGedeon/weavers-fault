@@ -346,3 +346,23 @@ always false and the note stayed hidden.
    even though `WS_EX_TOOLWINDOW` is still set — the shell re-evaluates when the window is shown.
    Toggling the bit off and on (with `SWP_FRAMECHANGED` each time) removes the button again while
    the window stays visible and clickable.
+
+## 14. A window born offscreen shows blank white when you try to give it to the user
+
+**Symptom.** The JanitorAI sign-in window appeared on screen as a plain white rectangle. Nothing in it, no page, and no way to use it — the user had to open Task Manager and kill Chrome. The import path was fine; only the human-facing window was broken.
+
+**Measured cause — four separate faults stacked on top of each other.**
+
+1. *The page was never the problem.* Attaching to the same tab over CDP reported `readyState: complete`, `title: "janitor - Login"`, 303 characters of body text, 98 nodes, `first-paint` and `first-contentful-paint` both recorded, and `Page.captureScreenshot` returned a 44 795-byte frame showing the full login form. The renderer had painted. The **window** had not.
+2. *A stale compositor surface.* Our windows are created at `--window-position=-32000,-32000`. Moving such a window with `SetWindowPos` does not give it a fresh surface: the window stays unpainted while the renderer keeps drawing into a surface nobody displays. Our own `revealProfileWindows` used exactly that approach.
+3. *We raised the wrong window.* `reveal()` reported `revealed: 10` — it moved and raised every visible window belonging to the profile's processes, including Chrome's untitled helper windows. The topmost window after that sequence can be a blank helper, which is precisely what "a plain white rectangle" looks like.
+4. *It did not look or behave like an app window.* The tool-window style we apply to keep sessions out of the taskbar (`WS_EX_TOOLWINDOW`) gives no taskbar button and no Alt-Tab entry. For an unattended session that is the point; for a window the user must type into it reads as a broken, unclosable window. On top of that Chrome displayed its "You are using an unsupported command-line flag" infobar, because `--disable-blink-features=AutomationControlled` is a flag it complains about.
+
+**Rule.**
+- **Place human-facing windows through Chrome itself:** `Browser.getWindowForTarget` → `Browser.setWindowBounds({ windowState: 'normal' })` → `setWindowBounds({ left, top, width, height })`. Never `SetWindowPos` a window that was born offscreen. Follow with a one-pixel resize and back, which forces the compositor to reallocate its output.
+- **Raise only titled windows.** Skip any window whose `GetWindowTextW` is empty — that is a helper. `SetForegroundWindow` is refused when the caller is not the foreground app, so attach the input queues first (`AttachThreadInput(fgThread, myThread, true) … false`).
+- **A window a human must use is a normal window:** clear `WS_EX_TOOLWINDOW`, set `WS_EX_APPWINDOW`, then re-hide it (`park()`) once the step is done. Do not leave a stray normal window on the desktop.
+- **Hold the session while a human is working.** The 30 s idle teardown closed the sign-in window before it could be used — measured: 0 processes at +38 s, 11 at +42 s with `hold()`.
+- **Suppress the flag infobar** with `--test-type` when `--disable-blink-features` is in use.
+
+**Check.** After any `reveal()`, screenshot the window itself with `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)`, not the desktop — the desktop grab only tells you what is on top, and the user may be looking at something else. A correct reveal shows browser chrome, the address bar, the page, and no infobar.

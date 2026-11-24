@@ -366,3 +366,26 @@ always false and the note stayed hidden.
 - **Suppress the flag infobar** with `--test-type` when `--disable-blink-features` is in use.
 
 **Check.** After any `reveal()`, screenshot the window itself with `PrintWindow(hwnd, hdc, PW_RENDERFULLCONTENT)`, not the desktop — the desktop grab only tells you what is on top, and the user may be looking at something else. A correct reveal shows browser chrome, the address bar, the page, and no infobar.
+
+## 15. JanitorAI ignores its own cookies — a signed-in session reads as signed out
+
+**Symptom.** The user signed in successfully (Google, in the revealed window), the page moved from `/login` to the feed, and `GET /api/weavers-vault/janitor/account` still answered `{"signedIn":false,"status":401}`.
+
+**Measured cause.** The site authenticates its API with a bearer token, not with the cookie session. On the *same* browser, on the *same* page, with the auth cookie present in the jar:
+
+| Request | Result |
+|---|---|
+| `fetch('/hampter/profiles/mine', {credentials:'include'})` | `401 {"message":"Unauthorized","statusCode":401}` |
+| same call + `Authorization: Bearer <access_token>` | `200` with the profile (`id`, `name`, `user_name`, `config`, …) |
+
+The token is **not** in `localStorage`. It is inside the chunked Supabase cookies `sb-<ref>-auth-token.0`, `.1`, … (measured: 3 180 + 1 763 bytes), either as raw JSON or as `base64-` + base64url JSON — both forms occur. Reading cookies alone therefore proves nothing, and `document.cookie` shows the cookie names while the API still refuses.
+
+**Rule.**
+- Authenticated JanitorAI reads carry `Authorization: Bearer <access_token>` decoded from the chunked `sb-*-auth-token.N` cookies in-page, ordered by the numeric suffix. Cookies alone are never enough.
+- Anonymous reads do work (tags, listing, detail all answered 200 anonymously), so a missing token degrades to anonymous — it does not fail. That is exactly why this cannot be detected by "does it return 200".
+- A parked page's token can expire unnoticed. Reload once to let the site's own client refresh it, rather than trying to mint a token ourselves.
+- Never trust a `200` as "signed in": only the account endpoint with an identity in it counts.
+
+**Check.** `GET /api/weavers-vault/janitor/account` must return `signedIn: true` with a name — measured `{"signedIn":true,"name":"Yang","id":"7bc4e46f-…","status":200}`.
+
+**Related trap, same session.** `browser.evaluate` does not exist: `evaluate` lives on the page connection (`CdpPage`), not on `VaultBrowser`. Calling it threw `browser.evaluate is not a function`, which surfaced as the very same 401. `VaultBrowser.evaluateInPage()` now exists for in-page expressions and enqueues like a fetch.

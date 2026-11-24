@@ -135,3 +135,33 @@ identically for every card, and it says nothing about rate limits.
   `created_at, description, id, name, slug`; names carry emoji (`"👨 Male"`, slug `male`).
 - Sorts: `trending24`, `trending`, `latest`, and **`popular`** (= the site's "Popular all time",
   `200`, 34 rows). `sort=all` is a `400` — the whitelist must reject it rather than forward it.
+
+## Added 2026-11-24 (third probe — signed in, 4 requests)
+
+Signed in as a real account, in the vault's own persistent profile. Everything
+here was measured, not inferred.
+
+- **The API ignores cookies.** `/hampter/profiles/mine` answers `401
+  {"message":"Unauthorized","statusCode":401}` from inside the page with the
+  `sb-<ref>-auth-token.*` cookies present, and `200` with the profile once
+  `Authorization: Bearer <access_token>` is added. The access token is not in
+  `localStorage`; it is inside the chunked `sb-<ref>-auth-token.0/.1` cookies
+  (3 180 + 1 763 bytes), raw JSON here, `base64-` prefixed in the other known
+  form. Anonymous reads (tags, listing, detail) keep working, so a token-less
+  read succeeds while being a different (anonymous) view.
+- **A public card exists.** The first row of `sort=trending24` while signed in
+  returned `showdefinition: true` with `personality`, `scenario`,
+  `first_message` (3 989 chars), `example_dialogs` and `scripts` populated.
+  The earlier anonymous sample (0 of 102) is therefore not proof that public
+  definitions are rare — it is proof that anonymous reads hide them.
+- **Detail payload shape.** `token_counts = {example_dialog_tokens,
+  first_message_tokens, personality_tokens, scenario_tokens, total_tokens}`;
+  the flat `total_tokens` is absent on a detail payload (2742 for that card).
+  `first_messages` had 6 entries against `first_message` + 5 alternates.
+- **Tag objects on a card** are the same shape as `/hampter/tags`
+  (`{created_at, description, id, name, slug}`), and `custom_tags` is a bare
+  array of strings. `name` keeps the emoji, e.g. `"👨 Male"`.
+- **Account config is a live preset**: `/hampter/profiles/mine` carries
+  `config.api`, `config.openAiModel`, `config.open_ai_mode: "proxy"`. That is the
+  object the `/generateAlpha` capture mutates, which is why S5 refuses to run on
+  a dirty profile and verifies afterwards.

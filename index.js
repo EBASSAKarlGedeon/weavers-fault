@@ -1730,7 +1730,7 @@ function renderDetail(popup, item, character) {
     popup.querySelector('.wv-dfab').addEventListener('click', () => {
         if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
         if (item.source === 'janny') { importJannyCharacter(item, character); return; }
-        if (item.source === 'janitor') { importJannyCharacter(item, character, '/janitor/card', janitorFiles); return; }
+        if (item.source === 'janitor') { importJanitorCard(item, character); return; }
         if (book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
@@ -1794,7 +1794,7 @@ function ledgerCheck(item) {
     return s.ledger.find(e => e.source === source && e.id === item.fullPath);
 }
 
-function ledgerAdd(item, what) {
+function ledgerAdd(item, what, reason = '') {
     const s = settings();
     const source = item.source ?? 'chub';
     s.ledger.push({
@@ -1803,6 +1803,10 @@ function ledgerAdd(item, what) {
         name: item.name,
         what,
         at: Date.now(),
+        // Why it failed, when it did (S9): 'private', 'transport', 'signed-out',
+        // 'script-denied', … — a ledger line that only says "lorebook" is a
+        // mystery, and the whole point is that every failure states a reason.
+        ...(reason ? { reason } : {}),
         url: source === 'saucepan'
             ? `https://saucepan.ai/companion/${item.fullPath}`
             : source === 'janny'
@@ -2772,10 +2776,88 @@ async function importJannyCharacter(item, character, route = '/janny/card', cach
         }
         ledgerAdd(item, 'character');
         toastr.success(`Imported ${character.data.name}`, "Weaver's Vault");
+        return importedAvatar;
     } catch (error) {
         console.error(`[${extensionName}] import failed`, error);
         toastr.error(error.message, "Weaver's Vault import failed");
+        return null;
     }
+}
+
+/**
+ * Import a JanitorAI character's lorebooks as World Info files (S8).
+ *
+ * The server classifies each book. `public` books arrive already converted to a
+ * characterBook, so they go through the same `convertCharacterBook` →
+ * `saveWorldInfo` pair the chub path uses — SillyTavern's own entry template
+ * stays the only definition of what an entry holds. `scripted` books need the
+ * LLM rebuild and are never run silently (they spend the user's tokens), and a
+ * `failed` book is reported with its measured reason, never as "private".
+ *
+ * The saved names land on the card as `vault_lorebooks` through
+ * `stampVaultProvenance` (merge-attributes, PITFALLS #1); `world` links the first
+ * one, because SillyTavern's linked-world field holds a single name.
+ * @returns {Promise<string[]>} the World Info names that were saved
+ */
+async function importJanitorLorebooks(item, avatar) {
+    let payload;
+    try {
+        const r = await fetch('/api/weavers-vault/janitor/lorebooks', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ id: item.fullPath, name: item.name }),
+        });
+        payload = await r.json();
+        if (!r.ok) throw vaultError(payload?.error || `JanitorAI answered ${r.status}`, payload?.code, r.status);
+    } catch (error) {
+        ledgerAdd(item, 'lorebooks', 'unavailable');
+        toastr.error(`Could not read the character's lorebooks: ${error.message}`, "Weaver's Vault lorebooks");
+        return [];
+    }
+
+    const books = Array.isArray(payload.books) ? payload.books : [];
+    const saved = [];
+    for (const book of books) {
+        if (book.kind === 'public' && book.book) {
+            try {
+                const worldInfo = convertCharacterBook(book.book);
+                await saveWorldInfo(book.name, worldInfo, true);
+                saved.push(book.name);
+                ledgerAdd(item, 'lorebook');
+                const count = Number(book.entryCount) || 0;
+                toastr.success(`Lorebook '${book.name}' imported (${count} ${count === 1 ? 'entry' : 'entries'}).`, "Weaver's Vault");
+            } catch (error) {
+                ledgerAdd(item, 'lorebook', 'save-failed');
+                toastr.error(`Lorebook '${book.name}' could not be saved: ${error.message}`, "Weaver's Vault");
+            }
+            continue;
+        }
+        const reason = book.reason || book.kind;
+        ledgerAdd(item, 'lorebook', reason);
+        if (book.kind === 'scripted') {
+            toastr.info(`'${book.name}' is a scripted lorebook — it needs an LLM rebuild, which is not run automatically.`, "Weaver's Vault lorebooks");
+        } else if (book.kind === 'closed') {
+            toastr.warning(reason === 'private'
+                ? `'${book.title}' is private — the author has not published it, so it cannot be downloaded.`
+                : `'${book.title}' has no entries to import.`, "Weaver's Vault lorebooks");
+        } else {
+            toastr.warning(`'${book.title}' could not be downloaded (${reason}).`, "Weaver's Vault lorebooks");
+        }
+    }
+
+    if (saved.length) {
+        await updateWorldInfoList();
+        const stamped = await stampVaultProvenance(avatar, { world: saved[0], vault_lorebooks: saved });
+        if (stamped) await getCharacters();
+        else console.warn(`[${extensionName}] lorebooks saved but the card was not stamped with vault_lorebooks`);
+    }
+    return saved;
+}
+
+/** A JanitorAI import: the card, then whichever of its books can be had. */
+async function importJanitorCard(item, character) {
+    const avatar = await importJannyCharacter(item, character, '/janitor/card', janitorFiles);
+    if (avatar) await importJanitorLorebooks(item, avatar);
 }
 
 // Fetches a source file through Loreweaver's content pipeline (UA spoofing +

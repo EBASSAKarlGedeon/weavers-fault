@@ -244,10 +244,40 @@ the host's own `convertCharacterBook` → `saveWorldInfo` (the chub path). Silly
 stays the single source of truth; `saveWorldInfo` writes `data` to `/api/worldinfo/edit` as-is, so an
 entry hand-built from Glaze's field list would silently miss whatever ST adds next.
 
-*Status: pure logic DONE* (`janitorLorebookRefs`, `janitorScriptEntries`, `classifyJanitorLorebook`,
-`janitorScriptToCharacterBook`, `janitorLorebookName` in `src/endpoints/weavers-vault-janitor.js`;
-38 tests in `tests/vault/janitor-lorebook.test.js`, suite at 259). Route `POST /janitor/lorebooks`,
-client wiring and the on-disk import verification remain.
+*Status: DONE and verified on disk (2026-11-26).* `janitorLorebookRefs`, `janitorScriptEntries`,
+`classifyJanitorLorebook`, `janitorScriptToCharacterBook`, `janitorLorebookName` live in
+`src/endpoints/weavers-vault-janitor.js`; `POST /janitor/lorebooks` serves them; the import path
+saves each public book through the host's `convertCharacterBook` → `saveWorldInfo` and stamps
+`world` + `vault_lorebooks` via merge-attributes. 38 tests in `tests/vault/janitor-lorebook.test.js`
+(suite at 259).
+
+Verified by importing the measured specimen ("Hero World RPG", two public books) into the
+`Loreweaver-testing` worktree's data through the real UI, then decoding what landed:
+
+```
+characters/Hero World RPG.png      508 996 bytes, chara + ccv3
+  description 3501 · first_mes 527 · creator_notes 7346
+  extensions.vault_source = janitor, vault_url = …/characters/d818757e-…
+  extensions.world         = "Hero World RPG — Heroes and Villains"
+  extensions.vault_lorebooks = ["Hero World RPG — Heroes and Villains",
+                                "Hero World RPG — World Info"]
+worlds/Hero World RPG — Heroes and Villains.json   1 entry · uid 0 · 17 keys · 31 257 chars
+worlds/Hero World RPG — World Info.json            1 entry · uid 0 · 17 keys · 11 919 chars
+  both: constant=true, disable=false, position=1, selective=false, 42 fields per entry
+```
+
+42 fields per entry is the check that the conversion went through SillyTavern's own template rather
+than a hand-built entry. Cleanup by provenance (`vault_source==='janitor'` AND the exact
+`vault_url`): exactly 1 match, then the worktree was restored to 98 characters / 0 new worlds.
+
+Measured while verifying, and worth knowing: **`showdefinition` is account-dependent**. The same
+card answers `showdefinition: true` signed in and `false` anonymously, so a sandbox with a fresh
+`_vault-janitor-profile` sees a public card as closed. `docs/FAQ.md` (main repo) records the session
+copy that fixes it, and the sibling trap of starting the sandbox from the Testing worktree, whose
+`src/` predates these routes.
+
+Still open (deliberately): the scripted/LLM rebuild action, closed-book v2 capture, and "Lorebooks
+only" as an import mode for this source.
 
 **S9 — Ledger and errors.** Every import lands in the existing `ledger`; every failure states a
 reason (`unproxyable`, `closed-capture-failed`, `challenge`, `signed-out`, `rate-limited`).

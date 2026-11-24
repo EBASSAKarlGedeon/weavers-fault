@@ -20,6 +20,7 @@ const IMG_CHUB = new URL('chub.png', import.meta.url).href;
 const IMG_SAUCEPAN = new URL('saucepan.svg', import.meta.url).href;
 const IMG_DATACAT = new URL('datacat.png', import.meta.url).href;
 const IMG_JANNY = new URL('janny.svg', import.meta.url).href;
+const IMG_JANITOR = new URL('janitor.svg', import.meta.url).href;
 
 // Window-chrome glyphs, drawn inline to match Glaze's Material icons
 // (`Icons.crop_square_rounded` / `Icons.fullscreen_exit_rounded`) instead of
@@ -34,11 +35,19 @@ const SOURCE_META = {
     saucepan: { label: 'Saucepan', img: IMG_SAUCEPAN },
     datacat: { label: 'DataCat', img: IMG_DATACAT },
     janny: { label: 'JannyAI', img: IMG_JANNY },
+    janitor: { label: 'JanitorAI', img: IMG_JANITOR },
 };
 
 // JannyAI cards arrive already built by the server (it drives a real browser
 // through the site's Cloudflare challenge); keyed by character id.
 const jannyFiles = new Map();
+
+// JanitorAI cards also arrive built by the server (it reads
+// /hampter/characters/{id} inside the signed-in browser session). The detail
+// payload is kept separately because a closed card has to be able to say *why*
+// it cannot be imported.
+const janitorFiles = new Map();
+const janitorCards = new Map();
 
 // Extracted Saucepan cards by companionId — the detail FAB import consumes these.
 const saucepanFiles = new Map();
@@ -46,6 +55,24 @@ const saucepanFiles = new Map();
 function parseCompanionIdLocal(url) {
     const m = /saucepan\.ai\/companion\/([a-f0-9-]{8,64})/i.exec(String(url));
     return m ? m[1] : null;
+}
+
+/**
+ * The id out of a pasted JanitorAI link.
+ *
+ * The site's canonical page is `/characters/<uuid>_<slug>` — the slug after the
+ * underscore is decoration and must not end up in the id. A bare uuid is
+ * accepted too, because that is what an id copied from an API payload looks
+ * like, and a link to the profile is not a character at all.
+ * @param {string} url
+ * @returns {string|null}
+ */
+function parseJanitorIdLocal(url) {
+    const text = String(url ?? '').trim();
+    const page = /janitorai\.com\/characters\/([0-9a-f]{8}-[0-9a-f-]{4,})/i.exec(text);
+    if (page) return page[1].split('_')[0];
+    const bare = /^([0-9a-f]{8}-[0-9a-f-]{4,})$/i.exec(text);
+    return bare ? bare[1] : null;
 }
 
 const extensionName = "Weaver's Vault";
@@ -467,6 +494,9 @@ function searchRequest() {
 }
 
 function runSearch() {
+    // JanitorAI opens as paste-to-import; its browse grid is a later stage, so a
+    // stray search here must not clear the grid with a request nothing answers.
+    if (state.source === 'janitor') return;
     const myEpoch = ++state.epoch;
     state.loading = true;
     state.page = state.page || 1;
@@ -505,7 +535,7 @@ function runSearch() {
 function loadMore() {
     // Only browsable sources page; clearing the grid for a paste-URL source
     // (Saucepan) must not drag the sentinel into a search.
-    if (state.source === 'saucepan' || state.loading || state.reachedEnd) return;
+    if (state.source === 'saucepan' || state.source === 'janitor' || state.loading || state.reachedEnd) return;
     state.page += 1;
     runSearch();
 }
@@ -689,11 +719,18 @@ function wireToolbar() {
         state.query = search.value;
         settings().query = search.value;
         saveSettingsQuiet();
-        // Saucepan source: the search bar is a paste-URL importer, not browse.
+        // Saucepan and JanitorAI: the search bar is a paste-URL importer.
         if (state.source === 'saucepan') {
             clearTimeout(searchTimer);
             searchTimer = setTimeout(() => {
                 if (parseCompanionIdLocal(state.query)) importSaucepanUrl(state.query.trim());
+            }, 600);
+            return;
+        }
+        if (state.source === 'janitor') {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                if (parseJanitorIdLocal(state.query)) importJanitorUrl(state.query.trim());
             }, 600);
             return;
         }
@@ -705,6 +742,11 @@ function wireToolbar() {
             e.preventDefault();
             clearTimeout(searchTimer);
             importSaucepanUrl(search.value.trim());
+        }
+        if (e.key === 'Enter' && state.source === 'janitor' && parseJanitorIdLocal(search.value)) {
+            e.preventDefault();
+            clearTimeout(searchTimer);
+            importJanitorUrl(search.value.trim());
         }
     });
 
@@ -1168,10 +1210,16 @@ function wireWinChrome(popup, onClose) {
     });
 }
 
-async function openDetail(item, preloaded = null) {
+async function openDetail(item, preloaded = null, report = null) {
     ensureOverlay();
     const popup = root.querySelector('.wv-detail');
     popup.hidden = false;
+    // A closed JanitorAI definition is a verdict, not a failure: there is no
+    // card to preview, so it renders the verdict instead of an empty sheet.
+    if (report?.needsCapture) {
+        renderDetailClosed(popup, item, report);
+        return;
+    }
     popup.innerHTML = `
         <div class="wv-dwin">
             <div class="wv-dwinbar">
@@ -1181,7 +1229,7 @@ async function openDetail(item, preloaded = null) {
             </div>
             <div class="wv-dloading">
                 <span class="wv-spinner"></span>
-                <div class="wv-dphase">${item.source === 'janny' ? 'Opening JannyAI in a browser session…' : 'Loading character…'}</div>
+                <div class="wv-dphase">${item.source === 'janny' ? 'Opening JannyAI in a browser session…' : item.source === 'janitor' ? 'Reading JanitorAI…' : 'Loading character…'}</div>
             </div>
         </div>`;
     wireWinChrome(popup, () => { popup.hidden = true; });
@@ -1193,18 +1241,30 @@ async function openDetail(item, preloaded = null) {
         return;
     }
     try {
-        if (item.source === 'janny') {
-            // The server reads the page inside a real browser (Cloudflare) and
-            // hands back a finished, provenance-stamped card PNG.
-            const r = await fetch('/api/weavers-vault/janny/card', {
+        if (item.source === 'janny' || item.source === 'janitor') {
+            // Both sources read their detail inside a real browser session and
+            // hand back a finished, provenance-stamped card PNG.
+            const janitor = item.source === 'janitor';
+            const r = await fetch(`/api/weavers-vault${janitor ? '/janitor' : '/janny'}/card`, {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({ id: item.fullPath, name: item.name }),
                 signal: detailAbort.signal,
             });
             const payload = await r.json();
-            if (!r.ok) throw vaultError(payload?.error || `JannyAI answered ${r.status}`, payload?.code, r.status);
-            jannyFiles.set(item.fullPath, payload.file);
+            if (!r.ok) throw vaultError(payload?.error || `${janitor ? 'JanitorAI' : 'JannyAI'} answered ${r.status}`, payload?.code, r.status);
+            if (janitor) {
+                // A closed card is a classification, not an error: it has no
+                // importable text at all, so the detail has to say so.
+                if (payload.needsCapture) {
+                    janitorCards.set(item.fullPath, payload);
+                    renderDetailClosed(popup, item, payload);
+                    return;
+                }
+                janitorFiles.set(item.fullPath, payload.file);
+            } else {
+                jannyFiles.set(item.fullPath, payload.file);
+            }
             renderDetail(popup, item, payload.character);
             return;
         }
@@ -1225,9 +1285,9 @@ async function openDetail(item, preloaded = null) {
                 </div>
                 <div class="wv-derror">
                     <span class="fa-solid fa-triangle-exclamation wv-derricon"></span>
-                    <div class="wv-derrmsg">${item.source === 'datacat' ? 'DataCat' : item.source === 'janny' ? 'JannyAI' : 'chub.ai'} failed — ${escapeHtml(error.message)}</div>
+                    <div class="wv-derrmsg">${item.source === 'datacat' ? 'DataCat' : item.source === 'janny' ? 'JannyAI' : item.source === 'janitor' ? 'JanitorAI' : 'chub.ai'} failed — ${escapeHtml(error.message)}</div>
                     <div class="wv-derractions">
-                        ${error.code === 'janny_browser' ? '<button class="wv-dshowbrowser">Show the browser window</button>' : ''}
+                        ${error.code === 'janny_browser' || error.code === 'janitor_browser' ? '<button class="wv-dshowbrowser">Show the browser window</button>' : ''}
                         <button class="wv-dretry" data-fullpath="${escapeHtml(item.fullPath)}">Try again</button>
                     </div>
                 </div>
@@ -1240,7 +1300,8 @@ async function openDetail(item, preloaded = null) {
             const button = event.currentTarget;
             button.disabled = true;
             try {
-                const r = await fetch('/api/weavers-vault/janny/browser/focus', { method: 'POST', headers: getRequestHeaders() });
+                const focus = item.source === 'janitor' ? '/janitor/browser/focus' : '/janny/browser/focus';
+                const r = await fetch(`/api/weavers-vault${focus}`, { method: 'POST', headers: getRequestHeaders() });
                 const body = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(body?.error || `The browser answered ${r.status}`);
                 toastr.info('A Chrome window was brought to the front. Finish the check there, then press “Try again”.', "Weaver's Vault");
@@ -1272,6 +1333,48 @@ const DETAIL_PROMPT_SECTIONS = [
     ['system_prompt', 'System Prompt'],
     ['post_history_instructions', 'Post-History Instructions'],
 ];
+
+/**
+ * What a closed JanitorAI card can honestly show.
+ *
+ * Measured: such a payload has `personality`, `scenario`, `first_message`,
+ * `example_dialogs` and `scripts` all null, with every `token_counts.*` at 0 —
+ * only the public bio survives. So there is nothing to preview and nothing to
+ * import, and the sheet says exactly that instead of showing blank blocks. The
+ * import button is absent rather than disabled: a dead button invites clicking.
+ */
+function renderDetailClosed(popup, item, report) {
+    const row = report?.row ?? {};
+    const reason = janitorBlockMessage(report);
+    const bio = String(row.blurb ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    const tags = [...(row.tags ?? []), ...(row.customTags ?? [])].filter(Boolean).slice(0, 8);
+    popup.innerHTML = `
+        <div class="wv-dwin">
+            <div class="wv-dwinbar">
+                <div class="wv-sheettitle"></div>
+                <button class="wv-winbtn wv-dmax" title="Maximize">${ICON_MAXIMIZE}</button>
+                <button class="wv-winbtn wv-dclose" title="Close"><span class="fa-solid fa-xmark"></span></button>
+            </div>
+            <div class="wv-dscroll">
+                <div class="wv-dpane wv-dpane-info">
+                    <div class="wv-heroname">${escapeHtml(row.name || 'Untitled')}</div>
+                    ${row.creator ? `<div class="wv-heroauthor">@${escapeHtml(row.creator)}</div>` : ''}
+                    <div class="wv-dclosednote">
+                        <span class="fa-solid fa-lock wv-derricon"></span>
+                        <div>${escapeHtml(reason)}</div>
+                    </div>
+                    <div class="wv-dtagwrap">${tags.map(detailTagChip).join('')}</div>
+                    ${bio ? `
+                        <div class="wv-dseclabel">Public bio</div>
+                        <div class="wv-bio">${escapeHtml(bio)}</div>` : ''}
+                    <div class="wv-dspacer"></div>
+                </div>
+            </div>
+        </div>`;
+    const close = () => { popup.hidden = true; };
+    wireWinChrome(popup, close);
+    popup.querySelector('.wv-dclose').addEventListener('click', close);
+}
 
 function renderDetail(popup, item, character) {
     const d = character.data;
@@ -1433,6 +1536,8 @@ function renderDetail(popup, item, character) {
                 window.open(`https://datacat.run/characters/${encodeURIComponent(item.id)}`, '_blank', 'noopener');
             } else if (item.source === 'janny') {
                 window.open(`https://jannyai.com/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
+            } else if (item.source === 'janitor') {
+                window.open(`https://janitorai.com/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             } else {
                 window.open(`https://chub.ai/characters/${encodeURIComponent(item.fullPath)}`, '_blank', 'noopener');
             }
@@ -1447,6 +1552,7 @@ function renderDetail(popup, item, character) {
     popup.querySelector('.wv-dfab').addEventListener('click', () => {
         if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
         if (item.source === 'janny') { importJannyCharacter(item, character); return; }
+        if (item.source === 'janitor') { importJannyCharacter(item, character, '/janitor/card', janitorFiles); return; }
         if (book) showImportModeSheet(item, character);
         else importChubCharacter(item, character, false);
     });
@@ -1523,6 +1629,8 @@ function ledgerAdd(item, what) {
             ? `https://saucepan.ai/companion/${item.fullPath}`
             : source === 'janny'
                 ? `https://jannyai.com/characters/${item.fullPath}`
+                : source === 'janitor'
+                    ? `https://janitorai.com/characters/${item.fullPath}`
                 : `https://chub.ai/characters/${item.fullPath}`,
     });
     saveSettingsQuiet();
@@ -1557,15 +1665,27 @@ function showSourceMenu() {
 
 // Chip/placeholder must match the persisted source on every open — setSource
 // isn't called for restores (would clear the grid/reset search).
+/**
+ * What the search box means for the active source.
+ *
+ * Kept in one place because two callers set it (the chip hydration and the
+ * DataCat layout switch) and they disagreed: the layout pass unconditionally
+ * wrote "Search characters...", so switching to JanitorAI advertised a search
+ * that source does not do yet.
+ * @returns {string}
+ */
+function searchPlaceholder() {
+    if (state.source === 'saucepan') return 'Paste a saucepan.ai companion URL…';
+    if (state.source === 'janitor') return 'Paste a janitorai.com character URL…';
+    return 'Search characters...';
+}
+
 function hydrateSourceChip() {
     const meta = SOURCE_META[state.source] ?? SOURCE_META.chub;
     const chip = root.querySelector('.wv-source');
     chip.querySelector('img').src = meta.img;
     chip.querySelector('.wv-srclabel').textContent = meta.label;
-    const search = root.querySelector('.wv-search');
-    search.placeholder = state.source === 'saucepan'
-        ? 'Paste a saucepan.ai companion URL…'
-        : 'Search characters...';
+    root.querySelector('.wv-search').placeholder = searchPlaceholder();
 }
 
 /**
@@ -1583,7 +1703,7 @@ function applySourceLayout() {
     const search = root.querySelector('.wv-search');
     if (search) {
         search.hidden = browsing;
-        search.placeholder = 'Search characters...';
+        search.placeholder = searchPlaceholder();
     }
     if (!browsing) hideDatacatBrowser();
 }
@@ -2200,6 +2320,69 @@ async function importDatacatBridgeCard(payload) {
     }
 }
 
+// ─── JanitorAI paste-to-import (S4) ──────────────────────────────────────────
+// One URL in, one card out. The server reads /hampter/characters/{id} inside the
+// signed-in browser session and classifies what it got, because on this site a
+// card that hides its definition returns a complete-looking payload whose text
+// fields are all null — importing that would create a blank card.
+
+/** Why a card cannot be imported, in words a user can act on. */
+function janitorBlockMessage(payload) {
+    const reason = payload?.blockReason;
+    if (reason === 'unproxyable') return 'This creator turned off the proxy, so JanitorAI will not serve this character to anyone.';
+    if (reason === 'private') return 'This character is private.';
+    if (reason === 'deleted') return 'This character was deleted.';
+    if (reason === 'missing') return 'JanitorAI has no character with that id.';
+    return 'JanitorAI hides this character\'s definition, so there is nothing to import yet.';
+}
+
+async function importJanitorUrl(url) {
+    const status = root.querySelector('.wv-status');
+    const id = parseJanitorIdLocal(url);
+    if (!id) {
+        status.classList.add('wv-status-error');
+        status.textContent = 'That is not a JanitorAI character link.';
+        return;
+    }
+    status.classList.remove('wv-status-error');
+    status.textContent = 'Reading JanitorAI…';
+    try {
+        const r = await fetch('/api/weavers-vault/janitor/card', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ id }),
+        });
+        const payload = await r.json().catch(() => null);
+        if (!r.ok) throw vaultError(payload?.error || `JanitorAI answered ${r.status}`, payload?.code, r.status);
+        if (payload.needsCapture) {
+            // Not an error: the card exists, its definition is closed. Saying so
+            // is honest; importing it anyway would create a blank character.
+            janitorCards.set(id, payload);
+            status.classList.add('wv-status-error');
+            status.textContent = janitorBlockMessage(payload);
+            const item = { id, fullPath: id, name: payload.row?.name ?? '', source: 'janitor' };
+            openDetail(item, null, payload);
+            return;
+        }
+        const character = payload.character;
+        const item = {
+            id,
+            fullPath: id,
+            name: character.data.name,
+            avatarUrl: payload.avatarDataUrl,
+            tags: character.data.tags ?? [],
+            nsfw: Boolean(payload.row?.nsfw),
+            source: 'janitor',
+        };
+        janitorFiles.set(id, payload.file);
+        status.textContent = '';
+        openDetail(item, character);
+    } catch (error) {
+        status.classList.add('wv-status-error');
+        status.textContent = error.message;
+    }
+}
+
 // ─── Saucepan URL import (M4) ────────────────────────────────────────────────
 // The server does the extraction (auth-gated REST + decoy-fragment
 // reassembly) and returns a ready card PNG; the import then rides the exact
@@ -2360,21 +2543,21 @@ async function importSaucepanCharacter(item, character) {
  * there is nothing to stamp afterwards — and stamping is exactly where imports
  * used to get blanked, so not touching the card again is the safer path.
  */
-async function importJannyCharacter(item, character) {
-    let cardFile = jannyFiles.get(item.fullPath);
+async function importJannyCharacter(item, character, route = '/janny/card', cache = jannyFiles) {
+    let cardFile = cache.get(item.fullPath);
     if (!cardFile) {
         // Detail was opened before a reload, or the cache was cleared: rebuild it
         // from the same route rather than failing.
         try {
-            const r = await fetch('/api/weavers-vault/janny/card', {
+            const r = await fetch(`/api/weavers-vault${route}`, {
                 method: 'POST',
                 headers: getRequestHeaders(),
                 body: JSON.stringify({ id: item.fullPath, name: item.name }),
             });
             const payload = await r.json();
-            if (!r.ok) throw vaultError(payload?.error || `JannyAI answered ${r.status}`, payload?.code, r.status);
+            if (!r.ok) throw vaultError(payload?.error || `The source answered ${r.status}`, payload?.code, r.status);
             cardFile = payload.file;
-            jannyFiles.set(item.fullPath, cardFile);
+            cache.set(item.fullPath, cardFile);
             character = payload.character;
         } catch (error) {
             toastr.error(error.message, "Weaver's Vault import failed");

@@ -2097,3 +2097,25 @@
 
 #wv-root.wv-browsing .wv-search { display: none; }
 #wv-root.wv-browsing .wv-row2 { margin-bottom: 10px; }
+
+/* A closed JanitorAI card: a verdict block, not an error view. The icon is
+   sized inline so it sits with the text instead of the 48px _ErrorView glyph. */
+.wv-dclosednote {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 14px 0 6px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: rgba(255, 196, 84, 0.10);
+    border: 1px solid rgba(255, 196, 84, 0.28);
+    color: var(--wv-on-var);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.wv-dclosednote .wv-derricon {
+    font-size: 14px;
+    margin-top: 2px;
+    color: #ffc454;
+}

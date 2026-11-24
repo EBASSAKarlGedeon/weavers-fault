@@ -389,3 +389,23 @@ The token is **not** in `localStorage`. It is inside the chunked Supabase cookie
 **Check.** `GET /api/weavers-vault/janitor/account` must return `signedIn: true` with a name — measured `{"signedIn":true,"name":"Yang","id":"7bc4e46f-…","status":200}`.
 
 **Related trap, same session.** `browser.evaluate` does not exist: `evaluate` lives on the page connection (`CdpPage`), not on `VaultBrowser`. Calling it threw `browser.evaluate is not a function`, which surfaced as the very same 401. `VaultBrowser.evaluateInPage()` now exists for in-page expressions and enqueues like a fetch.
+
+## 16. A payload's `avatar` is a CDN key, not a URL
+
+**Symptom.** Every imported JanitorAI card arrived with the default five.png avatar, and no error was logged that a user would ever see.
+
+**Measured cause.** The detail payload carries `avatar: "fP9hArYdWUi1ML3cb7IqN.webp"` — a bare key. The import path did `fetch(avatarUrl)` on it, which throws (relative URL, no scheme), and the catch fell through to the default avatar. Nothing failed loudly, so the card looked merely plain.
+
+**Rule.** Resolve a source's image before fetching it, using that source's own contract. JanitorAI's is Glaze's `resolveJanitorAvatar`: `http…` unchanged, leading `/` under `https://ella.janitorai.com`, a bare key under `/bot-avatars/`, anything else under the CDN root, all with `?width=400`. Measured result after the fix: the card PNG went from 312 695 bytes (the default avatar) to 422 974 bytes (the real one).
+
+**Check.** `normalizeJanitorRow(...).avatar` must start with `https://`, and the built card must not be byte-identical to `public/img/five.png`.
+
+## 17. One derived value, two writers
+
+**Symptom.** Switching to JanitorAI showed the chip "JanitorAI" but the search box still said "Search characters...", advertising a search the source did not do yet.
+
+**Measured cause.** Both `hydrateSourceChip()` and `applySourceLayout()` set `search.placeholder`, and the layout pass unconditionally wrote the generic string — so whichever ran last won. Saucepan looked correct only because its layout pass never touched the placeholder.
+
+**Rule.** A value derived from the active source gets **one** producer. `searchPlaceholder()` now answers for every source and both callers ask it. The same shape of bug is what produced the tag-vocabulary leak in `setSource()` (PITFALLS #13) — per-source state written in more than one place drifts.
+
+**Check.** For every provider, read the chip label and the placeholder together; they must describe the same source (verified: chub/saucepan/janitor each correct).

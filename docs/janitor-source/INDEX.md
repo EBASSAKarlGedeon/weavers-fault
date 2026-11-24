@@ -104,3 +104,27 @@ worth knowing before trusting a literal:
   Open ones include whether `/hampter/tags` and `/hampter/characters/tags/suggest` are truly
   anonymous-readable (asserted in a doc comment, not provable from code), and how the chunked
   `sb-*-auth-token` cookie is assembled.
+
+## Live probe, 2026-11-24 (SillyTavern side, not Glaze)
+
+Run before planning, because the dossier alone could not settle whether JanitorAI is reachable, what
+an anonymous read returns, or how common a recoverable card is. Method: one persistent Chrome
+profile, same-origin `fetch()` from `https://janitorai.com/`, ~15 requests total, no loops, no batch.
+
+| Measurement | Result |
+|---|---|
+| Cloudflare wall on `/hampter/*` | **None observed** — `GET /hampter/tags`, `GET /hampter/characters?...` and `GET /hampter/characters/{id}` all answered `200 application/json` anonymously, no challenge page |
+| Listing shape | `{"data": [ … ]}`; 34 rows per page; row keys include `id, name, avatar, description, showdefinition, is_proxy_enabled, is_public, tags[], custom_tags[], stats.total_tokens, creator_*` |
+| Detail (`showdefinition: false`) | `personality`, `scenario`, `first_message`, `first_messages`, `example_dialogs`, `scripts` all **`null`**; every `token_counts.*` = 0; only `description` populated (2 044 chars of HTML bio) |
+| Recoverable cards | **0 of 102** (`sort=trending24`, `latest`, `trending`; 34 each) had `showdefinition: true` |
+| `is_proxy_enabled: false` | 10 / 24 / 13 of 34 per sort — i.e. a capture can only 403 for that share of cards |
+| `allow_proxy` on the opened card | `true` |
+
+Consequence for the plan: a "import only public definitions" v1 has nothing to import. Every card
+needs the `/generateAlpha` capture path (or an equivalent), so definition recovery is v1 work, and
+`is_proxy_enabled: false` must be detected before any capture is attempted rather than discovered as
+a 403 after the browser dance.
+
+This section supersedes the "works without an account is asserted in a doc comment" caveat above for
+the three endpoints measured: they do answer anonymously. It does **not** prove they answer
+identically for every card, and it says nothing about rate limits.

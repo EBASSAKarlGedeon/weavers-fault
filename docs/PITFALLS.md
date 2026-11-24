@@ -540,3 +540,27 @@ A trivial `window.__probe = 1` behaves identically, so this is the mechanism, no
 **Rule.** Server code may not import from `public/scripts/extensions/**`. Shared logic lives in `src/` and the client receives it as data (here: the server converts the bio and returns `bioHtml`). One implementation, no second copy in the extension.
 
 **Check.** `git ls-files src/endpoints | grep janitor-html` finds the module, and `grep -rn "public/scripts/extensions" src/` finds no import.
+
+## 29. A pasted link is not a search phrase
+
+**Symptom.** JanitorAI's new browse grid rendered "No results" on first open, with a search box that looked empty.
+
+**Measured cause.** `state.query` is persisted in settings, and on this install it still held the URL pasted during the S4 import (`https://janitorai.com/characters/57077881-…_sobo-gym-guy`). Two things then compounded:
+- `setSource()` only cleared the query when the source *changed*, so re-opening the same source kept it;
+- the search request sent it as `search=<that URL>`, and the site matched nothing.
+
+The box looked empty because the placeholder had been rewritten for browsing while the value came from a restore path that does not touch the input.
+
+**Rule.** A browser-backed source's query is either a phrase or a paste-URL, never both. The search request skips a query that parses as that source's character URL, and entering the source drops a persisted paste-URL. Any provider that both browses and accepts links needs this in its request builder, not in its UI.
+
+**Check.** Persist a URL as `query`, reload, switch to JanitorAI: the box is empty, one unfiltered listing request goes out, and cards render.
+
+## 30. The row normalizer never filled `tags`
+
+**Symptom.** Every JanitorAI grid card showed only its SFW/NSFW chip — no tag chips at all — while the same card's detail sheet listed five tags.
+
+**Measured cause.** `normalizeJanitorRow` declared `const cardTags = []` and never populated it, though the site sends full tag objects (`{"id":1,"name":"👨 Male","slug":"male"}`); only `tagIds` was derived. The grid draws `item.tags`, so the array was always empty. The detail sheet was unaffected because it reads names from the raw payload.
+
+**Rule.** A normalizer must fill every field it declares. When the payload shape is known (objects, not ids), map it — and let the UI pass read the chips, because "the field exists" is not "the field has content".
+
+**Check.** `normalizeJanitorHit(row).tags` equals `['Male']` for a row with one tag object, and every grid card shows its tag chips.

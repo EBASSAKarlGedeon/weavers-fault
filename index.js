@@ -164,6 +164,15 @@ const JANNY_SORTS = {
     relevant: { label: 'Most relevant', icon: 'fa-solid fa-magnifying-glass' },
 };
 
+// JanitorAI's listing has its own four sorts (the site 400s on anything else,
+// including `all`), so the menu must offer exactly these.
+const JANITOR_SORTS = {
+    trending24: { label: 'Trending 24 hours', icon: 'fa-solid fa-fire' },
+    trending: { label: 'Trending', icon: 'fa-solid fa-arrow-trend-up' },
+    latest: { label: 'Latest', icon: 'fa-solid fa-clock' },
+    popular: { label: 'Most popular', icon: 'fa-solid fa-star' },
+};
+
 const SORT_LABELS = {
     popular: 'Most popular',
     trending_week: 'Trending this week',
@@ -428,6 +437,25 @@ function activeFilterCount() {
  */
 function searchRequest() {
     const f = state.filters ?? { ...committedFilters(), tags: new Set() };
+    if (state.source === 'janitor') {
+        // The listing is a GET with a query string, and it filters on numeric tag
+        // ids — the sheet stores names, so they travel as names and the server
+        // resolves them through its cached catalogue.
+        const params = new URLSearchParams();
+        params.set('page', String(state.page || 1));
+        params.set('sort', state.sort);
+        // A pasted link is not a phrase. Leaving it in the box must not turn the
+        // grid into "search for this URL", which is how the first live run of S7
+        // returned "No results" while the box looked empty.
+        const phrase = state.query.trim();
+        if (phrase && !parseJanitorIdLocal(phrase)) params.set('search', phrase);
+        for (const tag of f.tags) params.append('tags[]', tag);
+        return {
+            url: `/api/weavers-vault/janitor/search?${params.toString()}`,
+            method: 'GET',
+            source: 'JanitorAI',
+        };
+    }
     if (state.source === 'janny') {
         // The index pages by number and filters on numeric tag ids; the sheet
         // stores names, so they travel as names and the server resolves them
@@ -494,19 +522,14 @@ function searchRequest() {
 }
 
 function runSearch() {
-    // JanitorAI opens as paste-to-import; its browse grid is a later stage, so a
-    // stray search here must not clear the grid with a request nothing answers.
-    if (state.source === 'janitor') return;
     const myEpoch = ++state.epoch;
     state.loading = true;
     state.page = state.page || 1;
     renderStatus('Searching…');
-    const { url, body, source } = searchRequest();
-    fetch(url, {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(body),
-    })
+    const { url, body, method = 'POST', source } = searchRequest();
+    fetch(url, method === 'GET'
+        ? { method, headers: getRequestHeaders() }
+        : { method, headers: getRequestHeaders(), body: JSON.stringify(body) })
         .then(r => r.json().then(payload => ({ ok: r.ok, status: r.status, payload })))
         .then(({ ok, status, payload }) => {
             if (myEpoch !== state.epoch) return; // stale
@@ -516,6 +539,18 @@ function runSearch() {
                 const detail = payload?.error ? ` — ${payload.error}` : '';
                 renderStatus(`${source} answered ${status}${detail}`, true);
                 return;
+            }
+            // A selected tag the provider no longer carries is dropped and named:
+            // leaving it selected would filter on nothing and still look like a
+            // successful search (the silent no-op the sheet must never produce).
+            if (payload.unknownTags?.length) {
+                const stale = payload.unknownTags.map(tag => String(tag));
+                for (const tag of stale) state.filters.tags.delete(tag);
+                const saved = committedFilters();
+                saved.tagNames = saved.tagNames.filter(tag => !stale.includes(tag));
+                saveSettingsQuiet();
+                hydrateControls();
+                toastr.warning(`${source} no longer has: ${stale.join(', ')}`, "Weaver's Vault filter");
             }
             if (state.page === 1) state.items = payload.items ?? [];
             else state.items.push(...(payload.items ?? []));
@@ -535,7 +570,7 @@ function runSearch() {
 function loadMore() {
     // Only browsable sources page; clearing the grid for a paste-URL source
     // (Saucepan) must not drag the sentinel into a search.
-    if (state.source === 'saucepan' || state.source === 'janitor' || state.loading || state.reachedEnd) return;
+    if (state.source === 'saucepan' || state.loading || state.reachedEnd) return;
     state.page += 1;
     runSearch();
 }
@@ -682,7 +717,9 @@ function hydrateControls() {
         ? (DATACAT_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')  // reserved for the optional REST adapter
         : state.source === 'janny'
             ? (JANNY_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')
-            : (SORT_ICONS[state.sort] ?? 'fa-solid fa-sort');
+            : state.source === 'janitor'
+                ? (JANITOR_SORTS[state.sort]?.icon ?? 'fa-solid fa-sort')
+                : (SORT_ICONS[state.sort] ?? 'fa-solid fa-sort');
     sortIcon.className = `${icon} wv-sorticon`;
     renderSortMenu();
 }
@@ -693,6 +730,9 @@ function sortTable() {
     }
     if (state.source === 'janny') {
         return Object.fromEntries(Object.entries(JANNY_SORTS).map(([k, v]) => [k, v.label]));
+    }
+    if (state.source === 'janitor') {
+        return Object.fromEntries(Object.entries(JANITOR_SORTS).map(([k, v]) => [k, v.label]));
     }
     return SORT_LABELS;
 }
@@ -730,7 +770,10 @@ function wireToolbar() {
         if (state.source === 'janitor') {
             clearTimeout(searchTimer);
             searchTimer = setTimeout(() => {
+                // A pasted link is an import; a phrase is a search. Both arrive in
+                // the same box because the source does both.
                 if (parseJanitorIdLocal(state.query)) importJanitorUrl(state.query.trim());
+                else resetAndSearch();
             }, 600);
             return;
         }
@@ -814,7 +857,11 @@ function wireToolbar() {
         state.tagQuery = q;
         state.tagExpanded = false;
         renderTagPicker();
-        if (q && state.source !== 'janny') tagSearchTimer = setTimeout(() => fetchTagSuggestions(q), 250); // Glaze's debounce; JannyAI has the whole catalog locally
+        // Glaze's debounce. A site-owned vocabulary is complete locally, so there
+        // is nothing to ask an index for (and chub's tag search would answer with
+        // another provider's words).
+        const closedVocabulary = state.source === 'janny' || state.source === 'janitor';
+        if (q && !closedVocabulary) tagSearchTimer = setTimeout(() => fetchTagSuggestions(q), 250);
     });
     root.querySelector('.wv-tagclear').addEventListener('click', () => {
         root.querySelector('.wv-tagfilter').value = '';
@@ -866,7 +913,7 @@ function openFilterSheet() {
     root.querySelector('.wv-tagclear').hidden = true;
     // Tags exist for chub (topics) and JannyAI (its own tag ids). Saucepan is not
     // browsable, so it gets neither.
-    const tagsAvailable = state.source === 'chub' || state.source === 'janny';
+    const tagsAvailable = state.source === 'chub' || state.source === 'janny' || state.source === 'janitor';
     const tagCard = root.querySelector('.wv-tagshead')?.closest('.wv-mcard');
     if (tagCard) tagCard.hidden = !tagsAvailable;
 
@@ -889,6 +936,20 @@ function openFilterSheet() {
     for (const selector of ['.wv-minair', '.wv-mintags']) {
         const row = root.querySelector(`.wv-sheetbody ${selector}`)?.closest('.wv-mrow');
         if (row) row.hidden = state.source !== 'chub';
+    }
+    // JanitorAI's listing takes a page, a sort, a search phrase, tag ids and a
+    // creator id — nothing else. A token range or a "match any tag" switch would
+    // filter on nothing and look like a successful search, so they are hidden
+    // rather than offered (the rule from PITFALLS #13: never offer a control the
+    // source cannot honour).
+    if (state.source === 'janitor') {
+        // The token range is one row holding both fields (`.wv-mintok`/`.wv-maxtok`).
+        for (const selector of ['.wv-mintok', '.wv-maxtok']) {
+            const row = root.querySelector(`.wv-sheetbody ${selector}`)?.closest('.wv-mrow');
+            if (row) row.hidden = true;
+        }
+        const anyTag = root.querySelector('.wv-sheetbody input[data-filter="inclusiveOr"]')?.closest('.wv-mrow');
+        if (anyTag) anyTag.hidden = true;
     }
     // The whole "must include" collapsible is chub-only too.
     const collapsible = root.querySelector('.wv-sheetbody .wv-collapsible');
@@ -967,18 +1028,30 @@ function commitFilters() {
     hydrateControls();
 }
 
+/**
+ * The sources whose tag vocabulary lives on the site rather than in a search
+ * index, and the endpoint that reads it.
+ * @returns {{label: string, url: string}|null}
+ */
+function siteTagSource() {
+    if (state.source === 'janitor') return { label: 'JanitorAI', url: '/api/weavers-vault/janitor/tags' };
+    if (state.source === 'janny') return { label: 'JannyAI', url: '/api/weavers-vault/janny/tags' };
+    return null;
+}
+
 async function ensureTagCloud() {
     if (state.tagCloud || state.tagCloudLoading) return;
     state.tagCloudLoading = true;
     renderTagPicker();
     try {
-        if (state.source === 'janny') {
-            // JannyAI's labels live on the site, not in its search index (which
-            // only knows numeric tagIds); the server reads its sidebar once and
-            // caches it.
-            const r = await fetch('/api/weavers-vault/janny/tags', { headers: getRequestHeaders() });
+        const siteTags = siteTagSource();
+        if (siteTags) {
+            // Both labels live on the site, not in a search index (JannyAI's
+            // index only knows numeric tagIds, JanitorAI's listing only numeric
+            // tag_id[]s); the server reads each once and caches it.
+            const r = await fetch(siteTags.url, { headers: getRequestHeaders() });
             const body = await r.json();
-            if (!r.ok) throw new Error(body?.error || `JannyAI answered ${r.status}`);
+            if (!r.ok) throw new Error(body?.error || `${siteTags.label} answered ${r.status}`);
             state.tagCloud = (body.tags ?? []).map(t => String(t.name ?? '').trim()).filter(Boolean);
             state.tagMeta = { source: body.source ?? null, fetchedAt: body.fetchedAt ?? null };
         } else {
@@ -1035,7 +1108,8 @@ function renderTagMeta() {
     const el = root.querySelector('.wv-tagmeta');
     if (!el) return;
     const meta = state.tagMeta;
-    if (state.source !== 'janny' || !meta) {
+    const siteTags = siteTagSource();
+    if (!siteTags || !meta) {
         el.hidden = true;
         el.innerHTML = '';
         return;
@@ -1046,7 +1120,10 @@ function renderTagMeta() {
     const ageDays = Number.isFinite(stamp) ? Math.floor((Date.now() - stamp) / 86_400_000) : null;
     let text = '';
     if (meta.source === 'fallback') {
-        text = "Built-in tag list — JannyAI's own list could not be read just now.";
+        text = `Built-in tag list — ${siteTags.label}'s own list could not be read just now.`;
+    } else if (meta.source === 'stale') {
+        // Serving last week's vocabulary is right; pretending it is current is not.
+        text = `${siteTags.label}'s tag list could not be refreshed just now — showing the cached list.`;
     } else if (ageDays !== null && ageDays >= 6) {
         text = `Tag list read ${ageDays} days ago.`;
     }
@@ -1054,19 +1131,21 @@ function renderTagMeta() {
     el.innerHTML = text
         ? `<span>${escapeHtml(text)}</span><button class="wv-tagrefresh">Refresh</button>`
         : '';
-    el.querySelector('.wv-tagrefresh')?.addEventListener('click', refreshJannyTags);
+    el.querySelector('.wv-tagrefresh')?.addEventListener('click', refreshProviderTags);
 }
 
-/** Re-read JannyAI's tag list, keeping the current one if the read fails. */
-async function refreshJannyTags(event) {
+/** Re-read the active provider's tag list, keeping the current one if it fails. */
+async function refreshProviderTags(event) {
     const button = event?.currentTarget;
+    const siteTags = siteTagSource();
+    if (!siteTags) return;
     if (button) button.disabled = true;
     try {
-        const r = await fetch('/api/weavers-vault/janny/tags?refresh=1', { headers: getRequestHeaders() });
+        const r = await fetch(`${siteTags.url}?refresh=1`, { headers: getRequestHeaders() });
         const body = await r.json();
-        if (!r.ok) throw new Error(body?.error || `JannyAI answered ${r.status}`);
+        if (!r.ok) throw new Error(body?.error || `${siteTags.label} answered ${r.status}`);
         const names = (body.tags ?? []).map(t => String(t.name ?? '').trim()).filter(Boolean);
-        if (!names.length) throw new Error('JannyAI returned no tags.');
+        if (!names.length) throw new Error(`${siteTags.label} returned no tags.`);
         state.tagCloud = names;
         state.tagMeta = { source: body.source ?? null, fetchedAt: body.fetchedAt ?? null };
         // Drop selections that no longer exist, so a filter cannot become a no-op.
@@ -1130,9 +1209,11 @@ function renderTagPicker() {
             .filter(s => s && !known.has(s.toLowerCase()) && ![...f.tags].some(t => t.toLowerCase() === s.toLowerCase()))
             .map(s => ({ name: s }));
         pool = [...local.map(t => ({ name: t })), ...remote];
-        // JannyAI's vocabulary is closed (its index filters on numeric tag ids,
-        // so free text could never match anything) — no "add raw" chip there.
-        const addRaw = state.source !== 'janny'
+        // Both site-owned vocabularies are closed: JannyAI's index and JanitorAI's
+        // listing filter on numeric tag ids, so a free-text tag could never match
+        // anything. No "add raw" chip for them.
+        const closedVocabulary = state.source === 'janny' || state.source === 'janitor';
+        const addRaw = !closedVocabulary
             && ![...f.tags].some(t => t.toLowerCase() === query)
             && !(state.tagCloud ?? []).some(t => t.toLowerCase() === query)
             && !remote.some(t => t.name.toLowerCase() === query);
@@ -1754,7 +1835,8 @@ function showSourceMenu() {
  */
 function searchPlaceholder() {
     if (state.source === 'saucepan') return 'Paste a saucepan.ai companion URL…';
-    if (state.source === 'janitor') return 'Paste a janitorai.com character URL…';
+    // JanitorAI browses and takes a pasted link: one box, both meanings.
+    if (state.source === 'janitor') return 'Search, or paste a janitorai.com character URL…';
     return 'Search characters...';
 }
 
@@ -1812,12 +1894,26 @@ function setSource(source) {
         // source knows it, else fall back to that source's default order.
         const known = source === 'datacat' ? DATACAT_SORTS
             : source === 'janny' ? JANNY_SORTS
-                : SORT_LABELS;
+                : source === 'janitor' ? JANITOR_SORTS
+                    : SORT_LABELS;
         if (!known[state.sort]) {
-            state.sort = source === 'datacat' ? 'fresh' : source === 'janny' ? 'newest' : 'popular';
+            state.sort = source === 'datacat' ? 'fresh'
+                : source === 'janny' ? 'newest'
+                    : source === 'janitor' ? 'trending24'
+                        : 'popular';
             settings().sort = state.sort;
             saveSettingsQuiet();
         }
+    }
+    // A pasted link persisted from the paste-to-import days is not a query for the
+    // grid: drop it on entry so browsing starts from the source's own listing.
+    const isPasteUrl = (source === 'janitor' && parseJanitorIdLocal(state.query))
+        || (source === 'saucepan' && parseCompanionIdLocal(state.query));
+    if (isPasteUrl) {
+        state.query = '';
+        settings().query = '';
+        const box = root.querySelector('.wv-search');
+        if (box) box.value = '';
     }
     state.source = source;
     settings().source = source;

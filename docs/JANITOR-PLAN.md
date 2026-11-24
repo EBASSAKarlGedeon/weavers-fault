@@ -171,6 +171,30 @@ no handler, no class, no escaped tags, no page errors).
 *Accept:* at 1500×950 and 390×844: grid renders 2-up on phone, chub-only filter rows stay hidden,
 search + tag filter return filtered results, detail opens, no console errors.
 
+*Status: DONE and verified on the live site (2026-11-24).* The listing is a GET with a query string;
+the sheet's tag **names** are resolved to the site's numeric `tag_id[]`s server-side through the cached
+catalogue, so the sheet stays source-agnostic. Filter rows this source cannot honour are hidden rather
+than offered (no token range, no "match any tag", no must-include), and the sort menu offers exactly the
+site's four sorts.
+
+Measured on the live site:
+- 34 cards on `sort=latest`, real tag chips, `@creator`, token counts, chat badges, avatars from
+  `ella.janitorai.com`; `hasMore` true so the sentinel pages.
+- **Tag filter proven by comparison**: the same sort with `⚔️ Enemies to Lovers` returned a completely
+  different set — 0 of 34 ids shared with the unfiltered page, and all 34 carried the tag.
+- Phrase search ("demon lord") returns 34 themed results, top hit "Veriel, the Demon Lord".
+- Detail opens from the grid (`POST /janitor/card`, sheet 8 338 chars, no error) and offers Recover.
+- Phone 390×844: **2 columns** (card width 173 px), toolbar fits, sheet fits (8…382 of 390, height 776),
+  24 tag chips, chub-only rows hidden. No page errors from the vault.
+
+Two defects, both written up in `PITFALLS.md`:
+- the persisted S4 paste-URL leaked in as a search phrase, so the first grid showed "No results"
+  while the box looked empty (#29);
+- the row normalizer declared `tags` and never filled it, so every card was chipless (#30).
+
+The 7 px horizontal overflow at 390 px is **not ours**: measured with the vault closed, it comes from
+`div.drawer.datacat-browser-topbar-slot` (the DataCat extension's topbar button) at `right: 397`.
+
 **S8 — Lorebooks (public + scripted).** `scripts[]` → classify public / scripted / closed; public
 downloads convert directly to World Info; scripted needs an LLM rebuild (reuse the vault's existing
 LLM path, not a new one); each becomes `<character> — <book>`; card records the list.

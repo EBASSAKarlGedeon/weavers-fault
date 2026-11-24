@@ -184,6 +184,9 @@ Measured on the live site:
   different set — 0 of 34 ids shared with the unfiltered page, and all 34 carried the tag.
 - Phrase search ("demon lord") returns 34 themed results, top hit "Veriel, the Demon Lord".
 - Detail opens from the grid (`POST /janitor/card`, sheet 8 338 chars, no error) and offers Recover.
+- Paging: the sentinel loaded pages 2 and 3 (34 → 68 → 102 cards). The site's live sort shifts while
+  you page — measured: page 2 shared **19 of 34** ids with page 1 — so appended items are de-duplicated
+  by id (68 cards, 65 unique *names*: three different cards share a name, ids are the key).
 - Phone 390×844: **2 columns** (card width 173 px), toolbar fits, sheet fits (8…382 of 390, height 776),
   24 tag chips, chub-only rows hidden. No page errors from the vault.
 

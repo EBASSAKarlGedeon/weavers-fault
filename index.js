@@ -1654,7 +1654,12 @@ function renderDetail(popup, item, character, report = {}) {
                         <div class="wv-dtagwrap">${(d.tags ?? []).slice(0, 8).map(detailTagChip).join('')}</div>
                         ${closed ? '' : (bioText ? `
                             <div class="wv-dseclabel">Description</div>
-                            <div class="wv-bio">${escapeHtml(bioText).replace(/\n/g, '<br>')}</div>`
+                            ${isHtml
+                                // A janitor card's notes are already converted, sanitised HTML
+                                // (janitor-html.js); escaping it printed the tags and its long
+                                // attribute strings also forced the tab strip out of view.
+                                ? `<div class="wv-bio wv-biohtml">${bioText}</div>`
+                                : `<div class="wv-bio">${escapeHtml(bioText).replace(/\n/g, '<br>')}</div>`}`
                             : ((d.tags ?? []).length ? '' : '<div class="wv-dnoprev">No preview available</div>'))}
                     </div>
                     <div class="wv-dpane wv-dpane-prompts" hidden>
@@ -1704,7 +1709,9 @@ function renderDetail(popup, item, character, report = {}) {
     popup.querySelector('.wv-dback').addEventListener('click', close);
 
     // Tab strip: pill track glass, sliding active pill, equal-width budget of
-    // 2.35 visible tabs (PillTabStrip) → 3 tabs scroll horizontally.
+    // Exactly three segments, each a third of the strip: the 2.35-tab budget
+    // from the multi-tab original clipped "Images" off the right edge on a
+    // desktop window (measured scrollWidth 751 vs clientWidth 594).
     const tabs = [...popup.querySelectorAll('.wv-dtab')];
     const panes = [...popup.querySelectorAll('.wv-dpane')];
     const ind = popup.querySelector('.wv-dtabind');

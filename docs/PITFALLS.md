@@ -683,3 +683,22 @@ is simply not in the taskbar.
 `tool=True app=False vis=True`. The window must still paint — a desktop capture must show the site,
 not a blank surface (`WS_EX_APPWINDOW`/`SetWindowPos` frame changes can strand a stale surface, which
 is why the check includes looking at it, not just the bit).
+
+## 36. A tab strip sized for a scrolling list of tabs clips a three-tab window
+
+**Symptom.** The detail window showed "Info" and "Prompt Blocks" and then a sliver of the Images
+icon at the right edge, with no visible way to reach it.
+
+**Measured cause.** `PillTabStrip` came from a design with more tabs and a deliberate "2.35 tabs
+visible, the rest scrolls" budget; with exactly three tabs it split the strip into 42.6% segments.
+Measured in the live window: `scrollWidth 751` against `clientWidth 594` — the third tab started at
+501 px and ended past the strip, and `overflow-x: auto` had its scrollbar hidden
+(`scrollbar-width: none`), so the clip looked like a rendering bug.
+
+**Rule.** A tab strip may overflow only when the tab count is unbounded. Ours is three, fixed, so
+each segment is a third (`flex: 1 1 0`, indicator `calc((100% - 6px) / 3)`) and the whole strip is
+reachable without scrolling.
+
+**Check.** With any card open, `.wv-dtabs` must report `scrollWidth === clientWidth`, and all three
+labels must be inside its box; clicking the third must move the pill to the third segment (measured:
+tabs at 338–536 / 536–734 / 734–932, indicator 730–926).

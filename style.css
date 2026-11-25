@@ -74,6 +74,20 @@
     display: none;
 }
 
+/* Buttons are rows here, never buttons: the UA paints `buttonface` (a light
+   grey) and no rule below ever overrode it, so the import-options rows and the
+   accordion headers came out white with the light theme text on top (measured:
+   rgb(239, 239, 239) behind #E1E3E6). `:where()` keeps this at zero specificity
+   so every component rule still wins. */
+:where(#wv-root) button {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
 .wv-panel {
     position: relative;
     display: flex;
@@ -1988,6 +2002,82 @@
 .wv-modehint {
     font-size: 12px;
     color: var(--wv-on-var);
+}
+
+/* Import options menu (character_detail_screen.dart:651-698): a compact card
+   anchored to the Import button, no scrim, no full-width layout behind it. */
+.wv-menuoverlay {
+    background: transparent;
+}
+
+.wv-importmenu {
+    position: absolute;
+    width: min(320px, calc(100vw - 24px));
+    background: var(--wv-ui);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    animation: wv-menu-in 120ms ease-out;
+}
+
+.wv-importmenu .wv-modehead {
+    padding: 12px 16px 6px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--wv-on);
+    opacity: 0.85;
+}
+
+.wv-importmenu .wv-modecard {
+    margin: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+}
+
+.wv-importmenu .wv-modecard button {
+    align-items: flex-start;
+    gap: 12px;
+    padding: 11px 16px 13px;
+}
+
+.wv-importmenu .wv-modecard button + button {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wv-importmenu .wv-modecard button:hover,
+.wv-importmenu .wv-modecard button:focus-visible {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.wv-importmenu .wv-modeicon {
+    width: 20px;
+    font-size: 16px;
+    line-height: 22px;
+    color: var(--wv-on);
+    opacity: 0.85;
+}
+
+.wv-importmenu .wv-modelabel {
+    font-size: 14.5px;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--wv-on);
+}
+
+.wv-importmenu .wv-modehint {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--wv-on-var);
+}
+
+@keyframes wv-menu-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
 }
 
 /* ------------------------------------------------------------------ */

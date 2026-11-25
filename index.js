@@ -4236,7 +4236,10 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
  */
 function showImportOptions({ item, character = null, source, meta = null, popup = null, fab = null, status = null, closed = false, bookCount = 1 }) {
     const overlay = document.createElement('div');
-    overlay.className = 'wv-mode-overlay';
+    // Not a sheet: Glaze shows these three rows as a menu anchored to the
+    // Import button (character_detail_screen.dart:651-698, MenuAnchor), so the
+    // page behind it stays visible and the button itself stays put.
+    overlay.className = 'wv-mode-overlay wv-menuoverlay';
     const rows = importOptions({ bookCount }).map(option =>
         '<button data-mode="' + option.mode + '">'
         + '<span class="fa-solid ' + option.icon + ' wv-modeicon"></span>'
@@ -4244,12 +4247,37 @@ function showImportOptions({ item, character = null, source, meta = null, popup 
         + '<span class="wv-modehint">' + escapeHtml(option.hint) + '</span></span>'
         + '</button>').join('');
     overlay.innerHTML =
-        '<div class="wv-modesheet">'
-        + '<div class="wv-modehandle"></div>'
+        '<div class="wv-importmenu" role="menu" aria-label="Import options">'
         + '<div class="wv-modehead">Import options</div>'
         + '<div class="wv-modecard">' + rows + '</div>'
         + '</div>';
     root.appendChild(overlay);
+
+    // Anchored to the button's own box: right edges flush, 10px of air above,
+    // and clamped to the viewport so a narrow phone never clips it.
+    const menu = overlay.querySelector('.wv-importmenu');
+    const place = () => {
+        const box = fab?.getBoundingClientRect?.();
+        const width = menu.offsetWidth;
+        const height = menu.offsetHeight;
+        const margin = 12;
+        if (!box || !box.width || !box.height) {
+            menu.style.right = margin + 'px';
+            menu.style.bottom = margin + 'px';
+            return;
+        }
+        const left = Math.max(margin, Math.min(box.right - width, window.innerWidth - width - margin));
+        let top = box.top - height - 10;
+        if (top < margin) top = Math.max(margin, Math.min(box.bottom + 10, window.innerHeight - height - margin));
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+    };
+    place();
+    window.addEventListener('resize', place);
+    const closeOverlay = () => {
+        window.removeEventListener('resize', place);
+        overlay.remove();
+    };
 
     const finishChub = (mode) => {
         const detail = root.querySelector('.wv-detail');
@@ -4274,9 +4302,9 @@ function showImportOptions({ item, character = null, source, meta = null, popup 
 
     overlay.addEventListener('click', async event => {
         const mode = event.target?.closest('button')?.dataset?.mode;
-        if (event.target === overlay) { overlay.remove(); return; }
+        if (event.target === overlay) { closeOverlay(); return; }
         if (!mode) return;
-        overlay.remove();
+        closeOverlay();
         if (source === 'chub') { finishChub(mode); return; }
         if (mode === 'lorebooks') {
             openCaptureSheet({ item, meta, character: null });

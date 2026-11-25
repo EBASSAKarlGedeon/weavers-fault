@@ -985,3 +985,25 @@ scope.
 numbers are in the harness run: 360x640 sheet 340x552 with `bodyScroll` 940 > `bodyClient`
 450 after the fix, 0 px horizontal overflow at both 360 and 728.
 
+## 48. Row buttons rendered on the UA `buttonface`, unreadable on the dark theme
+
+**Symptom.** The three import-options rows came out as white bars with light grey text on
+top (`#E1E3E6` on `rgb(239, 239, 239)`). Reported by the user from a screenshot; the same
+defect was present in the old bottom sheet and nobody had read it as a bug until the menu
+was compared to Glaze.
+
+**Cause.** `.wv-modecard button` set layout, padding and text alignment but never a
+background, and nothing else in the extension did either. A `<button>` with no author
+background paints the user agent default, which is light `buttonface` regardless of the
+theme. Every other row in the UI (`.wv-acchead`, `.wv-dpoprow`, `.wv-dtab`) had the same
+hole; they only looked right where a parent happened to paint over them.
+
+**Rule.** Reset the UA button chrome once, at the root, and let component rules opt in:
+`:where(#wv-root) button { background: transparent; border: 0; padding: 0; color: inherit;
+font: inherit; cursor: pointer; }`. `:where()` keeps the reset at zero specificity, so a
+class rule such as `.wv-importmenu .wv-modecard button:hover` still wins.
+
+**Check.** `tests/vault/import-flow.test.js` "the import menu is compact and undimmed"
+pins the reset ahead of the component rules and the zero-specificity wrapper; measured
+in the harness afterwards: menu `rgb(30, 30, 30)`, row background `rgba(0, 0, 0, 0)`,
+label `rgb(225, 227, 230)`.

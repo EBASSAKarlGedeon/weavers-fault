@@ -1028,3 +1028,36 @@ properties explicitly.
 **Check.** `tests/vault/import-flow.test.js` "the new rows cannot restyle the collect lists"
 pins `.wv-crow`'s fill and asserts `.wv-cm` declares no `background`; the harness render after
 the rename shows flat rows.
+
+## 50. The capture sheet dialled `profiles[0]`, and the failure hid the provider's own words
+
+**Symptom.** Pressing Build painted `Failed: API request failed` — a sentence that names neither
+the account, nor the model, nor the reason — while the server log held the truth:
+`Unauthorized {"error":{"message":"Invalid API key: this is not an OpenRouter API key…"}}` for a
+profile the user had not chosen. Tokens were spent on the wrong account.
+
+**Cause.** Two independent holes. (1) The sheet picked its connection profile with
+`profiles.find(p => p.id === state.profileId) || profiles[0]`, and nothing in the UI ever set
+`state.profileId`, so every build dialled whatever profile happened to sit first in the list —
+the fixture list starts with `Cheaper` (`api: custom`, an OpenAI-compatible key), not the
+active `Openrouter` profile. (2) The catch block showed `error.message`, and the message it got
+came from `public/scripts/extensions/shared.js:485`, which rethrows
+`new Error('API request failed', { cause: error })` — the provider's sentence lives on `.cause`
+and was never read.
+
+**Rule.** Resolve the profile **once**, at sheet open, through
+`resolveRebuildProfile(profiles, config.profileId, extension_settings.connectionManager?.selectedProfile)`
+(saved id → active id → `no-profile`), keep it in one `rebuildProfile` and use that single value
+for the request, the part-cache key and `state.built.model`. Never index a profile list
+positionally. When surfacing a caught error, walk `.cause` (helpers `honestError`) and show the
+deepest message — the wrapper's text is not an error, it is a shrug.
+
+**Check.** `tests/vault/import-flow.test.js`, describe "the build uses the active connection
+profile" (three tests): pins the `resolveRebuildProfile(...)` call with the active-profile
+fallback, the single `const profile = rebuildProfile;`, `partCacheKey({ profileId: profile.id,
+model: config.model || profile.model })`, `state.built = { … model: config.model ||
+rebuildProfile?.model }`, and `honestError` walking `.cause` in both catch paths. Live run, same
+card: before — `Failed: API request failed`, payload `model: google/gemma-4-31b-it:free` on
+profile `Cheaper`; after — payload logged `model: nvidia/nemotron-3.5-lightning:free,
+max_tokens: undefined`, sheet reached Saving with "Built 24 entries" (24/24 keyed, 16 049 content
+chars, JSON pane 45 345 chars parsing clean).

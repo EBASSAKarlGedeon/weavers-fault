@@ -3649,6 +3649,21 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
     const esc = value => escapeHtml(String(value ?? ''));
     const config = rebuildConfig();
     const profiles = rebuildProfiles();
+    // The sheet builds with the app's active chat-completion profile, the way
+    // Glaze builds with the active model — resolved once, here, so a book is
+    // never handed to whichever profile happens to sit first in the list.
+    const rebuildProfile = (() => {
+        try {
+            const resolved = resolveRebuildProfile(profiles, config.profileId,
+                extension_settings.connectionManager?.selectedProfile || '');
+            if (resolved.fellBack) {
+                toastr.info(`The saved rebuild profile is gone (ID: ${resolved.staleId}) — using '${resolved.profile.name || resolved.profile.model}'.`, "Weaver's Vault lorebooks");
+            }
+            return resolved.profile;
+        } catch {
+            return null;
+        }
+    })();
 
     const state = {
         importing: Boolean(characterImport),
@@ -3678,7 +3693,6 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         extraOn: Boolean(String(config.extra || '').trim()),
         name: '',
         partCache: new Map(),
-        profileId: config.profileId,
         openSection: '',
     };
 
@@ -3698,6 +3712,22 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
     const downloadable = () => [...jsonBooks(), ...jsBooks()];
 
     const setStatus = (selector, text) => { const el = $(selector); if (el) el.textContent = text; };
+    /**
+     * The provider's own sentence, not the wrapper's. `extensions/shared.js:485`
+     * replaces every transport failure with 'API request failed' and hangs the
+     * real one off `cause`, so a sheet that prints `error.message` tells the
+     * user nothing — an invalid OpenRouter key reads as a mystery.
+     */
+    const honestError = (error) => {
+        const seen = new Set();
+        let deepest = error;
+        while (deepest && deepest.cause && !seen.has(deepest.cause)) {
+            seen.add(deepest.cause);
+            deepest = deepest.cause;
+        }
+        const text = String(deepest?.message || error?.message || '').trim();
+        return text || 'Unknown error';
+    };
     const captureCount = () => (state.captured ? state.captured.trim().split(/\n\s*\n/).length : 0);
 
     const worldInfoFor = (name, entries) => {
@@ -4070,7 +4100,7 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
 
     const modelCall = async (plan, onPart) => {
         const parts = [];
-        const profile = profiles.find(entry => entry.id === state.profileId) || profiles[0];
+        const profile = rebuildProfile;
         if (!profile) throw new Error('No active LLM connection. Add one in Settings → API and select it before building a lorebook.');
         for (let i = 0; i < plan.requests.length; i += 1) {
             const messages = plan.requests[i];
@@ -4181,15 +4211,16 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
                 state.buildProgress = total > 1 ? [done, total] : null;
                 render();
             });
-            state.built = { name, entries, model: config.model || (profiles.find(entry => entry.id === state.profileId) || profiles[0])?.model || '' };
+            state.built = { name, entries, model: config.model || rebuildProfile?.model || '' };
             state.name = name;
         } catch (error) {
             console.error('[' + extensionName + '] lorebook build failed', error);
             const measurable = error instanceof RebuildError;
+            const message = honestError(error);
             setStatus('.wv-cbuildstatus', measurable && error.part
-                ? 'Failed at part ' + error.part + ' of ' + error.total + ' — ' + error.message
-                : 'Failed: ' + error.message);
-            toastr.error(error.message + (error.resumable ? ' The sheet is still open; press Build to retry.' : '. Nothing was saved.'), "Weaver's Vault rebuild");
+                ? 'Failed at part ' + error.part + ' of ' + error.total + ' — ' + message
+                : 'Failed: ' + message);
+            toastr.error(message + (error.resumable ? ' The sheet is still open; press Build to retry.' : '. Nothing was saved.'), "Weaver's Vault rebuild");
         } finally {
             clearInterval(timer);
             state.building = false;
@@ -4309,7 +4340,7 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
             else await savePublicBook(book);
             render();
         } catch (error) {
-            toastr.error(error.message, "Weaver's Vault lorebooks");
+            toastr.error(honestError(error), "Weaver's Vault lorebooks");
         }
     });
 

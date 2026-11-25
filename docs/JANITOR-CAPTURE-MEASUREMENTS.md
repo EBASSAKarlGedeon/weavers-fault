@@ -129,6 +129,28 @@ segment by content, and no count derived from blank lines may be reported as the
 entries", so one capture cannot be the whole book: coverage is not optional, and the natural page
 size is whatever the chat window allows per send, with repeated probes for the rest.
 
+## 2c. Coverage is additive, and the author published the key list
+
+**M17 — the author's own keyword list is the coverage index.** The public page of the first book
+(`https://janitorai.com/scripts/7ef92bc0-acdf-4d2e-9ee4-1cf9c716b388`) renders every servant as
+`Name: [keyword, keyword, ...]`. Parsed from the rendered page text (the `/hampter/script/{id}`
+record carries only the short blurb; the list lives in the page body): **334 rows, 996 keywords**,
+59 class headers. That is the vocabulary a coverage pass should feed as `triggerText` — no guessing,
+no vocabulary borrowed from the card.
+
+**M18 — a keyword probe is additive: nothing is displaced.** Capture 1 (card text only) held 55 blocks
+/ 116,568 chars. Capture 2 repeated the same card and added 20 servant keyword phrases (servants the
+card never mentions: `Ibuki Douji`, `Kurohime`, `Bedivere`, `Suzuka Gozen`, `Kondou Isami`,
+`Yamanami Keisuke`, `Barghest`, `Senji Muramasa`, `Chevalier d'Eon`, `Okita Souji`, `Saitou Hajime`,
+`Miyamoto Iori`, `Sigurd`, `Richard I`, `Charlemagne`, `Gawain`, `Lancelot Saber`, `Siegfried`,
+`Altera`, `Nero Claudius`). Result: **141 blocks / 184,096 chars**, of which **all 55 previous blocks
+survived** and **86 were new**. `triggerSystemChars` 316,234 (~79k tokens) in one send.
+
+So there is no cap at 55 and no eviction: selection is additive and key-driven, and the region grows
+with the vocabulary in the message. Coverage is therefore a paging loop over the 996 keywords, with
+the page size set by the chat window (~20-40 keywords per probe at ~3.4k chars of lore per keyword),
+and it terminates when a probe adds nothing new.
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region

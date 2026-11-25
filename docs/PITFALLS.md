@@ -826,29 +826,61 @@ start the style comes back 17 ms and 85 ms later. Before the watcher: 1054–689
 
 ## 42. A headless browser that describes itself is blocked, not challenged
 
-**Symptom.** A `--headless=new` vault browser gets `403 Access Restricted / This request was blocked by
-our firewall' on janitorai.com — a block page, with no Cloudflare interstitial, nothing to click, and a
-retry that fails identically. The same profile in a visible Chrome loads the same URL fine.
+**Symptom.** A `--headless=new` vault browser gets the firewall's block page on janitorai.com: title
+"Access Restricted", body "Your access has been blocked by our firewall", **status 200**, no Cloudflare
+interstitial, nothing to click, and a retry that fails identically. The same profile in a visible Chrome
+loads the same URL fine.
 
 **Measured cause.** The first headless build copied the identity from *the headless page itself*, so the
-UA it sent was `...HeadlessChrome/158.0.8127.37...` (2026-11-25). The firewall reads the UA string, not
-the renderer: it answers a self-identifying headless browser with a block, not a challenge, so none of the
+UA it sent was `...HeadlessChrome/158.0.8127.37...` (2026-11-25). The firewall reads the request, not the
+renderer: it answers a self-identifying headless browser with a block, not a challenge, so none of the
 challenge handling (reload, `_cf_chl_opt`, `cf-mitigated`) ever applies. Two further identity traps were
 measured the same day: `navigator.userAgentData` is **empty on `about:blank`** (brands `[]`, which no real
 Chrome reports), and headless reports `outerWidth/Height` 800x600 whatever the window bounds say, i.e.
-`outer < inner` — impossible for a real window.
+`outer < inner` — impossible for a real window. The block page is also **200 OK**, so a status check sees
+a perfectly good page and 710 KB of "your access has been blocked" reaches the parsers (hence the
+`needsHuman()` and `readyExpression()` guards).
 
 **Rule.** Never let the headless browser describe the machine. Measure the identity once with a **real
-headful Chrome** on the same machine (`ChromeBackend.measureIdentity()`: parked, taskbar-hidden, loads
-only the vault's own origin, no site traffic), cache it in `headless-identity.json` beside the profile,
-and apply it before the first site request: `Emulation.setUserAgentOverride` with the UA string copied
-verbatim (`Chrome/<major>.0.0.0` is already what a desktop Chrome sends), `Emulation.setDeviceMetricsOverride`
-with the measured screen and DPR, and `Browser.setWindowBounds` with an outer size at least as large as the
-viewport. Scrub `HeadlessChrome` from any product string that reaches the page. Refuse to start headless if
-no usable identity was measured — a guess is a different fingerprint, not a fix.
+headful Chrome** on the same machine — `ChromeBackend.measureIdentity()`: a throwaway profile, a local
+`file://` page (a secure context, so `getHighEntropyValues()` answers in full), parked and taskbar-hidden,
+**no network at all** — cache it in `headless-identity.json` beside the profile (keyed by Chrome major
+version, 7-day TTL), and have it in place **before the first request**: `Emulation.setUserAgentOverride`
+(UA verbatim; `Chrome/<major>.0.0.0` is what a desktop Chrome sends), `Emulation.setDeviceMetricsOverride`
+(measured screen and DPR, outer size never smaller than the viewport), and, when headless,
+`--user-agent=` on the command line (see #43). Refuse to start headless if no usable identity was
+measured — a guess is a different fingerprint, not a fix.
 
-**Check.** `node scripts/smoke-headless-backend.mjs` (local origin, no site traffic): the page must report
-`brands: [Chromium/158, Not.A/Brand/24, Google Chrome/158]`, `saysHeadless: false`, the machine screen
-(1536x864, dpr 1.25), `outer > inner`, and `osWindows: 0` for the profile's processes. Measured 2026-11-25:
-start 12.3 s for the first run (measuring launch + headless launch), 8 processes, 0 windows.
+**Check.** `node scripts/smoke-headless-backend.mjs` (local origin, no site traffic): `brands:
+[Chromium/158, Not.A/Brand/24, Google Chrome/158]`, `saysHeadless: false`, the machine screen (1536x864,
+dpr 1.25), `outer > inner`, `osWindows: 0`. Measured 2026-11-25: 6.7–9.8 s for the first run (measuring
+launch + headless launch), 8 processes, 0 windows. Then, only with a go-ahead, one real page load
+(`scripts/probe-headless-site.mjs`): title "JanitorAI - Build, share, and explore", signed in, in-page
+fetch 200.
+
+## 43. The first navigation is the one that gets judged
+
+**Symptom.** The page-side identity is verifiably correct — `navigator.userAgent` has no `Headless`, the
+brands are the Chrome ones, the screen is right — and the site *still* serves the block page. A fetch
+issued from that same page afterwards is clean.
+
+**Measured cause.** `--headless=new` sends `HeadlessChrome/<version>` on the **first navigation**, which
+happens before any CDP session exists to override it: over CDP the identity is applied after attach, and
+the request that decides the answer has already left. A local server that prints what arrived
+(`scripts/probe-request-headers.mjs`) shows it plainly: the document request carried
+`HeadlessChrome/158.0.0.0`, the next fetch from the same page carried `Chrome/158.0.0.0`. Everything else
+on the wire — `Sec-CH-UA*`, `Sec-Fetch-*`, `Accept-Language`, encodings, header set — was already
+identical to the headful browser, which is why the page-side fingerprint diff looked perfect while the
+block stayed.
+
+**Rule.** Anything the server reads *per request* belongs to the launch configuration, not to post-attach
+setup: pass `--user-agent=<measured UA>` when launching headless, and keep the CDP override for the
+high-entropy metadata it also sets. Verify identity by reading the request, never the page — a page can
+report a corrected UA while the request that fetched it said something else.
+
+**Check.** `node scripts/probe-request-headers.mjs` (local server, no site traffic): the `user-agent` rows
+for the document **and** the fetch must be identical between headless and headful. Measured 2026-11-25:
+before the flag, the headless document request said `HeadlessChrome/158.0.0.0` while its own fetch said
+`Chrome/158.0.0.0`; after it, both say `Chrome/158.0.0.0`.
+
 

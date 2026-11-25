@@ -4239,8 +4239,9 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         if (!state.built) return;
         const name = uniqueWorldName(currentName());
         try {
+            // saveEntries announces the save; a second toast here made every
+            // save show the same message twice.
             await saveEntries(state.built.entries, name);
-            toastr.success('Saved \'' + name + '\'', "Weaver's Vault");
             render();
         } catch (error) {
             setStatus('.wv-csavestatus', 'Save failed: ' + error.message);

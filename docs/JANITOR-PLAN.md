@@ -119,6 +119,12 @@ reports the account dirty with the exact diff, and `POST /janitor/account/restor
 with restore, the `janitor_separate.dart` port, the vendored capture page script, and the closed-card
 **Recover definition** button with elapsed-time status.
 
+*Superseded 2026-12: there is no separate recovery button any more. The button is always
+**Import to library**, and the capture is one mode of it (Import options → Character +
+lorebooks, Character only, Lorebooks only), matching Glaze
+`character_detail_screen.dart:1026-1037` and `:651-698`. The wording below is kept as the
+record of that pass.*
+
 Verified end to end, three times:
 - `POST /janitor/capture` → `recovered: true`, phases through `sending probe`, `sending trigger`,
   `separating`, `deleting chat`, `restored`; `restored: {restored: true, problems: [], diff: []}`.
@@ -126,7 +132,7 @@ Verified end to end, three times:
   `description` 741 chars (the card's personality, emitted as `personality: ""`), `first_mes` 25,
   `scenario` 263, provenance (`vault_source: janitor`, canonical `vault_url`) inside the PNG.
   The probe's system content was 1 129 chars, which is the ceiling a card this small can yield.
-- UI pass on the live server: closed card → "Recover definition" → `Recovering… Ns` → "Recovered and
+- UI pass on the live server (label then; see the note above): closed card → "Recover definition" → `Recovering… Ns` → "Recovered and
   imported: 741 characters of definition, 263 of scenario, 0 hidden lore entries." in 24 s, no page
   errors. The test import was then deleted by provenance (1 match, then 0).
 - **Kill test**: server killed during `opening chat` → `data/_vault-janitor-account.json` left at

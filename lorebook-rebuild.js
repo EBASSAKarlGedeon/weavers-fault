@@ -601,3 +601,74 @@ export function contextFor(options = {}) {
         extra: String(extra ?? '').trim(),
     };
 }
+
+/**
+ * A regular expression body that finds [needle] with the tolerance a captured
+ * prompt needs: literal whitespace may be any whitespace, and the glyphs a site
+ * may substitute (quotes, dashes) match each other. Port of Glaze's
+ * `loosePattern` (`janitor_separate.dart:141`), itself a port of `separate.cjs`.
+ * @param {string} needle
+ * @returns {string}
+ */
+export function loosePattern(needle) {
+    return String(needle)
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\s+/g, '\\s+')
+        .replace(/['\u2018\u2019\u02BC]/g, "['\u2018\u2019\u02BC]")
+        .replace(/["\u201C\u201D]/g, '["\u201C\u201D]')
+        .replace(/[-\u2013\u2014]/g, '[-\u2013\u2014]');
+}
+
+/**
+ * The verbatim entry contents of the character's public books.
+ *
+ * A JanitorAI capture assembles the SAME system message for public and closed
+ * books, so the captured text carries both. Public entries are injected
+ * verbatim, which is what makes cutting them back out possible.
+ * @param {{ book?: { entries?: { content?: string }[] }, entries?: unknown[] }[]} books
+ * @returns {string[]}
+ */
+export function publicEntryContents(books) {
+    const out = [];
+    for (const book of Array.isArray(books) ? books : []) {
+        const entries = book?.book?.entries ?? book?.entries ?? [];
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
+            const content = String(entry?.content ?? '');
+            if (content.trim()) out.push(content);
+        }
+    }
+    return out;
+}
+
+/**
+ * [text] with the verbatim content of public entries removed and the gaps
+ * tidied — what the capture's own separation does inline, available on its own
+ * for text isolated before those entries were known. Port of Glaze's
+ * `withoutPublicEntries` (`janitor_separate.dart:188`).
+ * @param {string} text
+ * @param {string[]} contents
+ * @returns {string}
+ */
+export function withoutPublicEntries(text, contents) {
+    const list = Array.isArray(contents) ? contents : [];
+    if (!list.length) return text;
+    let out = text;
+    for (const content of list) {
+        const needle = String(content ?? '').trim();
+        // Under twelve characters the pattern matches ordinary prose, so the
+        // guard is the same one Glaze uses.
+        if (needle.length < 12) continue;
+        let re;
+        try {
+            re = new RegExp(loosePattern(needle), 'gi');
+        } catch {
+            continue;
+        }
+        out = out.replace(re, '\n');
+    }
+    return out
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}

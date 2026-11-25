@@ -23,10 +23,20 @@ import {
     parseReply,
     partCacheKey,
     planBuild,
+    publicEntryContents,
     readRebuildSettings,
     resolveRebuildProfile,
     transportFor,
+    withoutPublicEntries,
 } from './lorebook-rebuild.js';
+import {
+    captureBack,
+    captureConfirmClose,
+    captureStage,
+    captureStages,
+    importOptions,
+    lorebookRefs,
+} from './import-flow.js';
 import { descriptionBodyHtml, escapeHtml, infoBioHtml } from './detail-view.js';
 // Resolved against this module URL so the popup markup works wherever the
 // extension is served from (the overlay DOM lives under the app's base URL).
@@ -1451,7 +1461,10 @@ async function openDetail(item, preloaded = null, report = null) {
             } else {
                 jannyFiles.set(item.fullPath, payload.file);
             }
-            renderDetail(popup, item, payload.character);
+            renderDetail(popup, item, payload.character, {
+                meta: payload.meta,
+                definitionPublic: payload.definitionPublic,
+            });
             return;
         }
         const r = await fetch(`/api/weavers-vault/chub/character?fullPath=${encodeURIComponent(item.fullPath)}`,
@@ -1536,8 +1549,9 @@ const DETAIL_PROMPT_SECTIONS = [
  * and a Recover button — which is why a JanitorAI card looked like a different
  * product from a chub one. There is now one window: hero, tab strip, prompt-block
  * drawers, FAB. A closed card changes the *data*, not the layout: the definition
- * is what is missing, so the FAB recovers instead of importing, and the site's
- * public bio stands in for the body inside the Description drawer.
+ * is what is missing, so the same Import button recovers it and offers its
+ * lorebooks, and the site's public bio stands in for the body inside the
+ * Description drawer.
  * @param {HTMLElement} popup
  * @param {object} item
  * @param {object} report the `/janitor/card` payload with `needsCapture`
@@ -1564,6 +1578,7 @@ function renderDetailClosed(popup, item, report) {
         closed: true,
         reason: janitorBlockMessage(report),
         bioHtml,
+        meta: report?.meta ?? null,
     });
 }
 
@@ -1598,7 +1613,7 @@ async function recoverJanitorCard(item, popup, button, status) {
         if (!r.ok) {
             status.textContent = payload?.error || `The capture answered ${r.status}`;
             if (payload?.code === 'janitor_profile_required') {
-                button.querySelector('span:last-child').textContent = 'Retry after completing your profile';
+                status.textContent += ' Complete your JanitorAI profile, then press Import again.';
             }
             ledgerFail(item, 'capture', failureReason(payload, r.status));
             toastr.error(status.textContent, "Weaver's Vault");
@@ -1640,6 +1655,11 @@ function renderDetail(popup, item, character, report = {}) {
     // whichever of the two above exists, so the drawer never renders empty.
     const sections = DETAIL_PROMPT_SECTIONS.filter(([key]) => (key === 'description' ? Boolean(descriptionBody) : Boolean(d[key])));
     const greetings = [d.first_mes, ...(d.alternate_greetings ?? [])].filter(g => g && g.trim());
+    // The Lorebooks inventory and the options sheet need the same list: the
+    // character's own `scripts` (Glaze `lorebookScriptRefs`), never a guess from
+    // the card's `character_book`.
+    const bookRefs = item.source === 'janitor' ? lorebookRefs(report?.meta ?? null) : [];
+    const chubBook = item.source === 'chub' ? d.character_book : null;
 
     popup.innerHTML = `
         <div class="wv-dwin">
@@ -1714,6 +1734,11 @@ function renderDetail(popup, item, character, report = {}) {
                                     <div class="wv-greettext" ${greetings.length === 1 ? '' : 'hidden'}>${escapeHtml(g).replace(/\n/g, '<br>')}</div>`).join('')}
                                 </div>
                             </div>` : ''}
+                        <div class="wv-dbooks" hidden>
+                            <div class="wv-dseclabel">Lorebooks</div>
+                            <div class="wv-dbooklist"></div>
+                            <div class="wv-dbookhint">Read-only inventory. Use Import to bring these into the library.</div>
+                        </div>
                     </div>
                     <div class="wv-dpane wv-dpane-images" hidden>
                         <div class="wv-dgal">
@@ -1723,11 +1748,11 @@ function renderDetail(popup, item, character, report = {}) {
                     <div class="wv-dspacer"></div>
                 </div>
             </div>
-            <button class="wv-dfab${closed ? ' wv-dfab-recover' : ''}">
-                <span class="fa-solid ${closed ? 'fa-wand-magic-sparkles' : 'fa-download'} wv-dfabicon"></span>
-                <span class="wv-dfablabel">${closed ? 'Recover definition' : 'Import to library'}</span>
+            <button class="wv-dfab">
+                <span class="fa-solid fa-download wv-dfabicon"></span>
+                <span class="wv-dfablabel">Import to library</span>
             </button>
-            ${closed ? '<div class="wv-recoverstatus" hidden></div>' : ''}
+            <div class="wv-recoverstatus" hidden></div>
         </div>`;
 
     const win = popup.querySelector('.wv-dwin');
@@ -1739,6 +1764,50 @@ function renderDetail(popup, item, character, report = {}) {
     // Exactly three segments, each a third of the strip: the 2.35-tab budget
     // from the multi-tab original clipped "Images" off the right edge on a
     // desktop window (measured scrollWidth 751 vs clientWidth 594).
+    // Lorebooks inventory (Glaze character_detail_screen.dart:937-952): the tab
+    // lists what the character has, read-only, and points at the Import button.
+    // Filled on first open, because the counts cost one JanitorAI request.
+    const bookList = popup.querySelector('.wv-dbooklist');
+    const booksBox = popup.querySelector('.wv-dbooks');
+    let booksLoaded = !bookRefs.length;
+    const renderBooks = (books) => {
+        bookList.innerHTML = books.map(book => {
+            const icon = book.kind === 'closed' ? 'fa-lock' : book.kind === 'scripted' ? 'fa-code' : 'fa-book';
+            const count = Number(book.entryCount) || 0;
+            const sub = book.kind === 'closed'
+                ? 'Private · recovered from the prompt'
+                : book.kind === 'scripted'
+                    ? 'Scripted (advanced) · rebuilt with your LLM'
+                    : count + ' ' + (count === 1 ? 'entry' : 'entries');
+            return '<div class="wv-dbookrow"><span class="fa-solid ' + icon + ' wv-dbookicon"></span>'
+                + '<div><div class="wv-dbooktitle">' + escapeHtml(book.title || book.name || 'Lorebook') + '</div>'
+                + '<div class="wv-dbooksub">' + escapeHtml(sub) + '</div></div></div>';
+        }).join('');
+    };
+    const loadBooks = async () => {
+        try {
+            const r = await fetch('/api/weavers-vault/janitor/lorebooks', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ id: item.fullPath, name: item.name }),
+            });
+            const payload = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(payload?.error || 'JanitorAI answered ' + r.status);
+            const books = Array.isArray(payload.books) ? payload.books : [];
+            if (books.length) renderBooks(books);
+        } catch (error) {
+            console.warn('[' + extensionName + '] lorebook inventory failed: ' + error.message);
+        }
+    };
+    if (chubBook) {
+        booksBox.hidden = false;
+        const count = (chubBook.entries ?? []).length;
+        renderBooks([{ kind: 'public', name: item.name || 'Lorebook', entryCount: count }]);
+    } else if (bookRefs.length) {
+        booksBox.hidden = false;
+        renderBooks(bookRefs.map(ref => ({ kind: ref.isPublic ? 'public' : 'closed', name: ref.title || 'Lorebook' })));
+    }
+
     const tabs = [...popup.querySelectorAll('.wv-dtab')];
     const panes = [...popup.querySelectorAll('.wv-dpane')];
     const ind = popup.querySelector('.wv-dtabind');
@@ -1750,6 +1819,7 @@ function renderDetail(popup, item, character, report = {}) {
         panes.forEach((p, j) => { p.hidden = j !== i; });
         const el = tabs[i];
         strip.scrollTo({ left: Math.max(0, el.offsetLeft - (strip.clientWidth - el.clientWidth) / 2), behavior: 'smooth' });
+        if (i === 1 && !booksLoaded) { booksLoaded = true; loadBooks(); }
     };
     tabs.forEach((t, i) => t.addEventListener('click', () => selectTab(i)));
     selectTab(0);
@@ -1826,58 +1896,12 @@ function renderDetail(popup, item, character, report = {}) {
         }), 0);
     });
 
-    // Import FAB → mode sheet when lorebooks exist, straight import otherwise.
-    // A closed card has nothing to import, so the same slot recovers the
-    // definition instead (same window, same position, different action).
+    // One Import button, always (Glaze character_detail_screen.dart:1026-1037):
+    // the options sheet appears only when the character lists lorebooks, and a
+    // closed definition is recovered through that same door — the recovery is a
+    // mode of the import, never a second button.
     const fab = popup.querySelector('.wv-dfab');
-    if (closed) {
-        fab.addEventListener('click', () => recoverJanitorCard(item, popup, fab, popup.querySelector('.wv-recoverstatus')));
-        return;
-    }
-    fab.addEventListener('click', () => {
-        if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
-        if (item.source === 'janny') { importJannyCharacter(item, character); return; }
-        if (item.source === 'janitor') { importJanitorCard(item, character); return; }
-        if (d.character_book) showImportModeSheet(item, character);
-        else importChubCharacter(item, character, false);
-    });
-}
-
-// Glaze's import-options sheet (GlazeBottomSheet, chrome-less content-sized
-// desktop window WITH dim): handle bar + "Import options" header + one group
-// card of three rows (icon 22 primary, label 16, hint 12).
-function showImportModeSheet(item, character) {
-    const overlay = document.createElement('div');
-    overlay.className = 'wv-mode-overlay';
-    overlay.innerHTML = `
-        <div class="wv-modesheet">
-            <div class="wv-modehandle"></div>
-            <div class="wv-modehead">Import options</div>
-            <div class="wv-modecard">
-                <button data-mode="both">
-                    <span class="fa-solid fa-book-open wv-modeicon"></span>
-                    <span class="wv-modelabels"><span class="wv-modelabel">Character + lorebooks</span><span class="wv-modehint">Also import the attached lorebooks</span></span>
-                </button>
-                <button data-mode="character">
-                    <span class="fa-regular fa-user wv-modeicon"></span>
-                    <span class="wv-modelabels"><span class="wv-modelabel">Character only</span><span class="wv-modehint">Import the character without its lorebooks</span></span>
-                </button>
-                <button data-mode="lorebook">
-                    <span class="fa-solid fa-book wv-modeicon"></span>
-                    <span class="wv-modelabels"><span class="wv-modelabel">Lorebooks only</span><span class="wv-modehint">Pull the lorebooks without adding the character</span></span>
-                </button>
-            </div>
-        </div>`;
-    root.appendChild(overlay);
-    overlay.addEventListener('click', e => {
-        const mode = e.target?.closest('button')?.dataset?.mode;
-        if (e.target === overlay || mode === 'cancel') { overlay.remove(); return; }
-        if (!mode) return;
-        overlay.remove();
-        root.querySelector('.wv-detail').hidden = true;
-        if (mode === 'lorebook') importChubLorebookOnly(item, character);
-        else importChubCharacter(item, character, mode === 'both');
-    });
+    fab.addEventListener('click', () => openImportFlow({ item, character, popup, closed, report }));
 }
 
 /**
@@ -3075,6 +3099,10 @@ async function importJannyCharacter(item, character, route = '/janny/card', cach
 /**
  * Import a JanitorAI character's lorebooks as World Info files (S8).
  *
+ * Kept for the rebuild-sheet pass: the import workflow now pulls books through
+ * the capture sheet instead, so nothing calls this from the Import button.
+ *
+ *
  * The server classifies each book. `public` books arrive already converted to a
  * characterBook, so they go through the same `convertCharacterBook` →
  * `saveWorldInfo` pair the chub path uses — SillyTavern's own entry template
@@ -3482,6 +3510,846 @@ function openRebuildSheet({ item, avatar, card, books, scripted, saved }) {
         if (event.target === overlay) overlay.remove();
     });
 }
+// ─── The capture sheet (Glaze janitor_lorebook_capture_sheet.dart) ──────────
+//
+// Four stages, derived rather than stored (:943-951): the character import,
+// then collecting, then building, then saving. Collect is the only stage that
+// talks to JanitorAI; build is the only one that spends the user's tokens;
+// save is the only one that writes a book.
+
+/**
+ * @param {{ item: object, meta: ?object, character: ?object,
+ *   characterImport: ?function }} options
+ */
+function openCaptureSheet({ item, meta = null, character = null, characterImport = null }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'wv-mode-overlay';
+    overlay.innerHTML =
+        '<div class="wv-csheet" role="dialog" aria-label="Lorebooks">'
+        + '<div class="wv-modehandle"></div>'
+        + '<div class="wv-chead">'
+        + '<button class="wv-cback" type="button" title="Back"><span class="fa-solid fa-chevron-left"></span></button>'
+        + '<div class="wv-ctitle">Lorebooks</div>'
+        + '<button class="wv-cclose" type="button" title="Close"><span class="fa-solid fa-xmark"></span></button>'
+        + '</div>'
+        + '<div class="wv-cstrip"></div>'
+        + '<div class="wv-cbody">'
+        + '<div class="wv-cstage-character wv-cempty" hidden>'
+        + '<span class="wv-spinner"></span>'
+        + '<div class="wv-cphasetitle">Importing the character</div>'
+        + '<div class="wv-cphasehint">Lorebooks come next: once the character is in the library, you choose what to send to make their entries fire.</div>'
+        + '<div class="wv-cphasestep"></div>'
+        + '</div>'
+        + '<div class="wv-cstage-collect" hidden>'
+        + '<div class="wv-csection wv-cpublic" hidden>'
+        + '<button class="wv-csechead" type="button" data-sec="public" title="Public lorebooks · <span class="wv-csecn"></span>"><span>Public lorebooks · <span class="wv-csecn"></span></span><span class="fa-solid fa-chevron-up wv-cchev"></span></button>'
+        + '<div class="wv-csecbody" data-sec="public" hidden>'
+        + '<div class="wv-cnote wv-cpubnote"></div>'
+        + '<div class="wv-crows wv-cpubrows"></div>'
+        + '<button class="wv-abtn wv-abtn-primary wv-cdownloadall" type="button" hidden><span class="wv-abtnlabel"></span></button>'
+        + '</div>'
+        + '</div>'
+        + '<div class="wv-csection wv-cclosed" hidden>'
+        + '<button class="wv-csechead" type="button" data-sec="closed"><span>Closed lorebooks · <span class="wv-cseccn"></span></span><span class="fa-solid fa-chevron-up wv-cchev"></span></button>'
+        + '<div class="wv-csecbody" data-sec="closed" hidden>'
+        + '<div class="wv-cnote wv-ccclosednote"></div>'
+        + '<div class="wv-crows wv-ccclosedrows"></div>'
+        + '</div>'
+        + '</div>'
+        + '<div class="wv-cnone" hidden>No lorebooks attached.</div>'
+        + '<div class="wv-cimportcap" hidden>'
+        + '<div class="wv-cnote wv-importcapnote"></div>'
+        + '<button class="wv-abtn wv-abtn-neutral wv-useimport" type="button"><span class="wv-abtnlabel">Continue with entries from the import</span></button>'
+        + '</div>'
+        + '<button class="wv-abtn wv-abtn-primary wv-ccapture" type="button"><span class="wv-abtnlabel">Collect lorebook entries</span></button>'
+        + '<div class="wv-cstatus wv-ccapturestatus" aria-live="polite"></div>'
+        + '</div>'
+        + '<div class="wv-cstage-build" hidden>'
+        + '<div class="wv-cgroup">'
+        + '<div class="wv-cgrouphead">Build with LLM</div>'
+        + '<div class="wv-cnote wv-cextnote"></div>'
+        + '<details class="wv-cdetails"><summary>Extracted content</summary><pre class="wv-cpre wv-cextpre"></pre></details>'
+        + '<button class="wv-abtn wv-abtn-neutral wv-cdltext" type="button"><span class="wv-abtnlabel">Download extracted content as .txt</span></button>'
+        + '</div>'
+        + '<div class="wv-cgroup">'
+        + '<div class="wv-cgrouphead">Context for key inference</div>'
+        + '<div class="wv-cnote">Sent to the model so it can infer trigger keys — never written back as entries.</div>'
+        + '<div class="wv-ctoggles wv-cbuildtoggles"></div>'
+        + '<input class="wv-tokeninput wv-cbuildextra" type="text" placeholder="Extra names or aliases you know (optional)" spellcheck="false" />'
+        + '</div>'
+        + '<div class="wv-cactions">'
+        + '<button class="wv-abtn wv-abtn-primary wv-cbuild" type="button"><span class="wv-abtnlabel">Build lorebook</span></button>'
+        + '<button class="wv-abtn wv-abtn-neutral wv-cpreview" type="button"><span class="wv-abtnlabel">Preview prompt</span></button>'
+        + '</div>'
+        + '<div class="wv-cnote">Building a lorebook may take a while, please be patient.</div>'
+        + '<div class="wv-cstatus wv-cbuildstatus" aria-live="polite"></div>'
+        + '</div>'
+        + '<div class="wv-cstage-save" hidden>'
+        + '<div class="wv-cgroup">'
+        + '<div class="wv-cgrouphead wv-cbuilt-head">Built 0 entries</div>'
+        + '<label class="wv-cfield"><span>World info name</span><input class="wv-tokeninput wv-cname" type="text" spellcheck="false" /></label>'
+        + '<div class="wv-cnote wv-cscope"></div>'
+        + '<div class="wv-cactions">'
+        + '<button class="wv-abtn wv-abtn-primary wv-csave" type="button"><span class="wv-abtnlabel">Save to library</span></button>'
+        + '<button class="wv-abtn wv-abtn-neutral wv-cexport" type="button"><span class="wv-abtnlabel">Export .json</span></button>'
+        + '<button class="wv-abtn wv-abtn-neutral wv-cdltext2" type="button"><span class="wv-abtnlabel">Download extracted content as .txt</span></button>'
+        + '</div>'
+        + '<div class="wv-cnote wv-ckeynote"></div>'
+        + '<div class="wv-cstatus wv-csavestatus" aria-live="polite"></div>'
+        + '</div>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+    root.appendChild(overlay);
+
+    const $ = selector => overlay.querySelector(selector);
+    const esc = value => escapeHtml(String(value ?? ''));
+    const config = rebuildConfig();
+    const profiles = rebuildProfiles();
+
+    const state = {
+        importing: Boolean(characterImport),
+        character,
+        avatar: null,
+        books: [],
+        loaded: false,
+        loadError: '',
+        downloaded: new Set(),
+        converting: '',
+        savingAll: false,
+        savedAllDone: 0,
+        importLore: '',
+        captured: '',
+        extracting: false,
+        extractPhase: '',
+        built: null,
+        building: false,
+        buildProgress: null,
+        elapsed: 0,
+        delivered: false,
+        context: { ...config.context },
+        extra: config.extra || '',
+        name: '',
+        partCache: new Map(),
+        profileId: config.profileId,
+        openSection: '',
+    };
+
+    const hasFlow = () => state.books.some(book => book.kind === 'closed') || Boolean(state.captured);
+    const stage = () => captureStage({
+        importing: state.importing,
+        hasFlow: hasFlow(),
+        built: Boolean(state.built),
+        extracted: Boolean(state.captured),
+    });
+    const busy = () => state.extracting || state.building || state.savingAll || Boolean(state.converting);
+    const keyOf = book => String(book.id ?? book.name ?? book.title ?? '');
+    const closedBooks = () => state.books.filter(book => book.kind === 'closed');
+    const jsonBooks = () => state.books.filter(book => book.kind === 'public' && book.book);
+    const jsBooks = () => state.books.filter(book => book.kind === 'scripted' && book.jsSource);
+    const downloadable = () => [...jsonBooks(), ...jsBooks()];
+
+    const setStatus = (selector, text) => { const el = $(selector); if (el) el.textContent = text; };
+    const captureCount = () => (state.captured ? state.captured.trim().split(/\n\s*\n/).length : 0);
+
+    const worldInfoFor = (name, entries) => {
+        const worldInfo = { entries: {} };
+        for (const entry of entries) {
+            const created = createWorldInfoEntry(name, worldInfo);
+            if (!created) throw new Error('SillyTavern could not allocate a World Info entry.');
+            created.comment = entry.comment;
+            created.key = entry.key;
+            created.keysecondary = entry.keysecondary;
+            created.content = entry.content;
+            created.order = entry.order;
+            created.constant = entry.constant;
+        }
+        return worldInfo;
+    };
+
+    const markDelivered = () => { state.delivered = true; };
+
+    const stamp = async (name) => {
+        if (!state.avatar) return;
+        try {
+            // merge-attributes replaces an array wholesale, so the list is read
+            // back and extended: a second book must not erase the first one's
+            // provenance, and an existing linked world stays linked.
+            const existing = characters.find(entry => entry.avatar === state.avatar)?.data?.extensions ?? {};
+            const books = Array.isArray(existing.vault_lorebooks) ? existing.vault_lorebooks : [];
+            const stamped = await stampVaultProvenance(state.avatar, {
+                world: existing.world || name,
+                vault_lorebooks: books.includes(name) ? books : [...books, name],
+            });
+            if (stamped) await getCharacters();
+        } catch (error) {
+            console.warn('[' + extensionName + '] lorebook saved but the card was not stamped: ' + error.message);
+        }
+    };
+
+    const saveEntries = async (entries, name) => {
+        const world = worldInfoFor(name, entries);
+        await saveWorldInfo(name, world, true);
+        await updateWorldInfoList();
+        await stamp(name);
+        ledgerAdd(item, 'lorebook');
+        markDelivered();
+        toastr.success('Saved \'' + name + '\' (' + entries.length + ' ' + (entries.length === 1 ? 'entry' : 'entries') + ').', "Weaver's Vault");
+    };
+
+    // The per-book destination sheet every public conversion ends in, the same
+    // two rows Glaze offers (:614-643).
+    const offerSave = (entries, defaultName) => {
+        const sheet = document.createElement('div');
+        sheet.className = 'wv-mode-overlay';
+        sheet.innerHTML =
+            '<div class="wv-modesheet">'
+            + '<div class="wv-modehandle"></div>'
+            + '<div class="wv-modehead">' + esc(defaultName) + '</div>'
+            + '<div class="wv-modecard">'
+            + '<button data-do="save"><span class="fa-solid fa-bookmark wv-modeicon"></span>'
+            + '<span class="wv-modelabels"><span class="wv-modelabel">Save to library</span>'
+            + '<span class="wv-modehint">Add to your World Info list</span></span></button>'
+            + '<button data-do="export"><span class="fa-solid fa-download wv-modeicon"></span>'
+            + '<span class="wv-modelabels"><span class="wv-modelabel">Export .json</span>'
+            + '<span class="wv-modehint">SillyTavern world info</span></span></button>'
+            + '</div>'
+            + '</div>';
+        root.appendChild(sheet);
+        sheet.addEventListener('click', async event => {
+            const action = event.target?.closest('button')?.dataset?.do;
+            if (event.target === sheet) { sheet.remove(); return; }
+            if (!action) return;
+            sheet.remove();
+            try {
+                if (action === 'export') {
+                    downloadTextFile(defaultName.replace(/[^\w\- ]+/g, '').trim() + '.json',
+                        JSON.stringify(worldInfoFor(defaultName, entries), null, 2));
+                    markDelivered();
+                    toastr.success('Exported ' + defaultName + '.json', "Weaver's Vault");
+                    return;
+                }
+                await saveEntries(entries, uniqueWorldName(defaultName));
+                render();
+            } catch (error) {
+                toastr.error(error.message, "Weaver's Vault");
+            }
+        });
+    };
+
+    const describeKinds = (book) => {
+        if (book.kind === 'scripted') return 'Scripted (advanced) · rebuilt with your LLM';
+        if (book.kind === 'closed') return book.reason === 'private' ? 'Private · recovered from the prompt' : 'Closed · recovered from the prompt';
+        const count = Number(book.entryCount) || 0;
+        return count + ' ' + (count === 1 ? 'entry' : 'entries') + ' · downloads whole';
+    };
+
+    const rowHtml = (book) => {
+        const key = keyOf(book);
+        const done = state.downloaded.has(key);
+        const publicBook = book.kind === 'public' || book.kind === 'scripted';
+        const icon = book.kind === 'closed' ? 'fa-lock' : book.kind === 'scripted' ? 'fa-code' : 'fa-book';
+        const action = book.kind === 'scripted' ? 'convert' : 'save';
+        const label = state.converting === key ? 'Converting…' : 'Convert';
+        return '<div class="wv-crow" data-key="' + esc(key) + '">'
+            + '<span class="fa-solid ' + icon + ' wv-crowicon"></span>'
+            + '<div class="wv-crowtext">'
+            + '<div class="wv-crowtitle">' + esc(book.title || book.name || 'Lorebook') + '</div>'
+            + '<div class="wv-crowsub">' + esc(describeKinds(book)) + '</div>'
+            + (book.description ? '<div class="wv-crowdesc">' + esc(book.description) + '</div>' : '')
+            + '</div>'
+            + (done
+                ? '<span class="fa-solid fa-check wv-crowdone" title="Saved or exported"></span>'
+                : publicBook
+                    ? '<button class="wv-crowbtn" type="button" data-act="' + action + '" data-key="' + esc(key) + '"'
+                        + (busy() ? ' disabled' : '') + '>' + label + '</button>'
+                    : '')
+            + '</div>';
+    };
+
+    const renderStrip = () => {
+        const current = stage();
+        const stages = captureStages({ importing: state.importing });
+        const strip = $('.wv-cstrip');
+        strip.hidden = !state.importing && !hasFlow();
+        strip.innerHTML = stages.map(entry =>
+            '<span class="wv-cpill' + (entry.id === current ? ' on' : '') + '">' + esc(entry.label) + '</span>').join('');
+        const back = $('.wv-cback');
+        const step = captureBack({ stage: current, built: Boolean(state.built), busy: busy() });
+        back.hidden = step === 'close';
+        back.disabled = step === 'held';
+        back.classList.toggle('wv-cbackheld', step === 'held');
+    };
+
+    const renderToggles = () => {
+        const container = $('.wv-cbuildtoggles');
+        const sources = [
+            ['card', 'Character card'],
+            ['scenario', 'Scenario'],
+            ['lorebookDescs', 'Lorebook titles + descriptions'],
+            ['greetings', 'Greetings'],
+        ];
+        container.innerHTML = sources.map(([key, label]) =>
+            '<label class="wv-rbtoggle"><input type="checkbox" data-ctx="' + key + '"'
+            + (state.context[key] ? ' checked' : '') + ' /> ' + esc(label) + '</label>').join('')
+            + '<label class="wv-rbtoggle wv-rboff"><input type="checkbox" disabled /> Catalog page (needs one extra site fetch)</label>';
+        container.querySelectorAll('[data-ctx]').forEach(box => {
+            box.addEventListener('change', () => { state.context[box.dataset.ctx] = box.checked; });
+        });
+        $('.wv-cbuildextra').value = state.extra;
+        $('.wv-cbuildextra').addEventListener('input', event => { state.extra = event.target.value; });
+    };
+
+    const render = () => {
+        const current = stage();
+        renderStrip();
+        overlay.querySelectorAll('.wv-cstage-character').forEach(node => { node.hidden = current !== 'character'; });
+        overlay.querySelectorAll('.wv-cstage-collect').forEach(node => { node.hidden = current !== 'collect'; });
+        overlay.querySelectorAll('.wv-cstage-build').forEach(node => { node.hidden = current !== 'build'; });
+        overlay.querySelectorAll('.wv-cstage-save').forEach(node => { node.hidden = current !== 'save'; });
+
+        // ── collect ───────────────────────────────────────────────────────────
+        const pub = [...jsonBooks(), ...jsBooks()];
+        const closed = closedBooks();
+        $('.wv-cpublic').hidden = !pub.length;
+        $('.wv-cclosed').hidden = !closed.length;
+        $('.wv-cnone').hidden = pub.length + closed.length > 0 || !state.loaded;
+        if (state.loadError) $('.wv-cnone').textContent = state.loadError;
+        overlay.querySelectorAll('.wv-cpublic .wv-csecn').forEach(node => { node.textContent = String(pub.length); });
+        overlay.querySelectorAll('.wv-cclosed .wv-cseccn').forEach(node => { node.textContent = String(closed.length); });
+        if (pub.length) {
+            const jsonCount = jsonBooks().length;
+            const jsCount = jsBooks().length;
+            const notes = ['Public, downloaded whole from Janitor.AI — no extraction needed.'];
+            if (jsCount) notes.push('Scripted (advanced) books are shipped as a script, so they are rebuilt into entries with your active LLM.');
+            if (closed.length) notes.push('Their entries are automatically removed from the extracted closed lorebook below.');
+            $('.wv-cpubnote').textContent = notes.join(' ');
+            $('.wv-cpubrows').innerHTML = pub.map(rowHtml).join('');
+            const all = $('.wv-cdownloadall');
+            all.hidden = pub.length < 2;
+            all.disabled = busy();
+            all.querySelector('.wv-abtnlabel').textContent = state.savingAll
+                ? 'Saving ' + state.savedAllDone + '/' + pub.length + '…'
+                : 'Download all (' + pub.length + ')';
+        }
+        if (closed.length) {
+            $('.wv-ccclosednote').textContent = closed.length > 1
+                ? 'This character has ' + closed.length + ' closed lorebooks which need to be extracted. They will be merged into a single lorebook due to limitations of the extraction method.'
+                : 'This lorebook is closed. It can only be recovered by capturing the assembled prompt through your Janitor.AI session and rebuilding it into keyed entries with your active LLM.';
+            $('.wv-ccclosedrows').innerHTML = closed.map(rowHtml).join('');
+        }
+        const captureButton = $('.wv-ccapture');
+        captureButton.disabled = busy() || !closed.length;
+        captureButton.querySelector('.wv-abtnlabel').textContent = state.extracting
+            ? (state.extractPhase || 'Collecting entries…')
+            : 'Collect lorebook entries';
+        const importCap = $('.wv-cimportcap');
+        importCap.hidden = !state.importLore || Boolean(state.captured);
+        if (!importCap.hidden) {
+            $('.wv-importcapnote').textContent = 'The character import already collected entries with the default context ('
+                + state.importLore.trim().split(/\n\s*\n/).length
+                + ' blocks). Continue with those, or collect again.';
+        }
+
+        // ── build ─────────────────────────────────────────────────────────────
+        if (current === 'build') {
+            const text = state.captured;
+            $('.wv-cextnote').textContent = text.trim()
+                ? 'Extracted content · ' + text.trim().split(/\n\s*\n/).length + ' blocks'
+                : 'No closed lorebook text was found.';
+            $('.wv-cextpre').textContent = text;
+            $('.wv-cdltext').hidden = !text.trim();
+            $('.wv-cbuild').disabled = state.building || !text.trim();
+            $('.wv-cpreview').disabled = state.building || !text.trim();
+            $('.wv-cbuild').querySelector('.wv-abtnlabel').textContent = state.building
+                ? (state.buildProgress
+                    ? 'Building… part ' + Math.min(state.buildProgress[0] + 1, state.buildProgress[1]) + ' of ' + state.buildProgress[1] + ' · ' + state.elapsed + 's'
+                    : 'Building… ' + state.elapsed + 's')
+                : 'Build lorebook';
+            if (!overlay.querySelector('.wv-cbuildtoggles').childElementCount) renderToggles();
+        }
+
+        // ── save ──────────────────────────────────────────────────────────────
+        if (current === 'save' && state.built) {
+            $('.wv-cbuilt-head').textContent = 'Built ' + state.built.entries.length + ' ' + (state.built.entries.length === 1 ? 'entry' : 'entries');
+            const nameInput = $('.wv-cname');
+            if (document.activeElement !== nameInput) nameInput.value = state.name || state.built.name;
+            nameInput.placeholder = state.built.name;
+            $('.wv-cscope').textContent = state.character
+                ? 'Saved for ' + (state.character.data?.name || 'this character') + ': the book is attached to the card, not switched on globally.'
+                : 'Saved standalone and switched off: no character was imported, so there is nothing to attach it to.';
+            $('.wv-ckeynote').textContent = state.built.entries.length
+                ? 'Keys were inferred by ' + (state.built.model || 'the build model') + '.'
+                : '';
+        }
+    };
+
+    // ── data ──────────────────────────────────────────────────────────────────
+    const loadBooks = async () => {
+        try {
+            const r = await fetch('/api/weavers-vault/janitor/lorebooks', {
+                method: 'POST',
+                headers: getRequestHeaders(),
+                body: JSON.stringify({ id: item.fullPath, name: item.name }),
+            });
+            const payload = await r.json().catch(() => ({}));
+            if (!r.ok) throw vaultError(payload?.error || 'JanitorAI answered ' + r.status, payload?.code, r.status, payload?.reason);
+            state.books = Array.isArray(payload.books) ? payload.books : [];
+            if (!state.character && payload.characterName) {
+                state.character = { data: { name: payload.characterName, description: '', scenario: '', first_mes: '', alternate_greetings: [] } };
+            }
+        } catch (error) {
+            state.loadError = 'Could not read the lorebooks: ' + error.message;
+        } finally {
+            state.loaded = true;
+            render();
+        }
+    };
+
+    // ── public books ──────────────────────────────────────────────────────────
+    const bookByKey = key => state.books.find(book => keyOf(book) === key);
+
+    const savePublicBook = async (book) => {
+        const name = uniqueWorldName(book.name || book.title || 'Lorebook');
+        const worldInfo = convertCharacterBook(book.book);
+        await saveWorldInfo(name, worldInfo, true);
+        await updateWorldInfoList();
+        state.downloaded.add(keyOf(book));
+        markDelivered();
+        ledgerAdd(item, 'lorebook');
+        await stamp(name);
+        toastr.success('Lorebook \'' + name + '\' imported (' + (Number(book.entryCount) || 0) + ' entries).', "Weaver's Vault lorebooks");
+    };
+
+    const downloadAll = async () => {
+        const list = downloadable();
+        if (!list.length || busy()) return;
+        state.savingAll = true;
+        state.savedAllDone = 0;
+        render();
+        const failed = [];
+        for (const book of list) {
+            try {
+                if (book.kind === 'scripted') await convertScript(book);
+                else await savePublicBook(book);
+                state.savedAllDone += 1;
+            } catch (error) {
+                failed.push(book.title || book.name || 'lorebook');
+                console.warn('[' + extensionName + '] lorebook download failed: ' + error.message);
+            }
+            render();
+        }
+        state.savingAll = false;
+        render();
+        if (failed.length) toastr.warning('Saved ' + state.savedAllDone + ' of ' + list.length + ' — failed: ' + failed.join(', '), "Weaver's Vault lorebooks");
+        else toastr.success('Saved ' + state.savedAllDone + ' lorebooks', "Weaver's Vault lorebooks");
+    };
+
+    const modelCall = async (plan, onPart) => {
+        const parts = [];
+        const profile = profiles.find(entry => entry.id === state.profileId) || profiles[0];
+        if (!profile) throw new Error('No active LLM connection. Add one in Settings → API and select it before building a lorebook.');
+        for (let i = 0; i < plan.requests.length; i += 1) {
+            const messages = plan.requests[i];
+            const key = partCacheKey({ profileId: profile.id, model: config.model || profile.model }, messages);
+            const cached = state.partCache.get(key);
+            if (cached) { parts.push(...cached); continue; }
+            onPart(i, plan.requests.length);
+            const request = transportFor(messages);
+            const overridePayload = { temperature: request.temperature };
+            if (config.model) overridePayload.model = config.model;
+            const data = await ConnectionManagerRequestService.sendRequest(
+                profile.id,
+                request.messages,
+                request.maxTokens,
+                { stream: request.stream, includePreset: request.includePreset, includeInstruct: false },
+                overridePayload,
+            );
+            const parsed = parseReply(data?.content, { part: i + 1, total: plan.requests.length, resumable: plan.requests.length > 1 });
+            parts.push(...parsed.entries);
+            state.partCache.set(key, parsed.entries);
+        }
+        return parts;
+    };
+
+    const contextNow = () => contextFor({
+        card: state.character,
+        books: state.books,
+        extra: state.extra,
+        toggles: state.context,
+    });
+
+    const planFor = (text, fromJs) => planBuild({
+        text,
+        fromJs,
+        context: contextNow(),
+        systemPrompt: fromJs ? config.systemJs : config.systemText,
+        countTokens: rebuildCountTokens(),
+    });
+
+    const convertScript = async (book) => {
+        if (state.converting) return;
+        if (book.jsSource === undefined) throw new Error('The script source could not be read.');
+        const plan = planFor(book.jsSource, true);
+        const go = confirm('Rebuild \'' + (book.title || book.name) + '\' with your active LLM?\n\n'
+            + plan.requests.length + ' request(s). Output cap: none.\n\nThis spends tokens on that account.');
+        if (!go) return;
+        state.converting = keyOf(book);
+        render();
+        try {
+            const entries = await modelCall(plan, (done, total) => {
+                setStatus('.wv-ccapturestatus', (book.title || book.name) + ': part ' + (done + 1) + ' of ' + total + '…');
+            });
+            state.downloaded.add(keyOf(book));
+            setStatus('.wv-ccapturestatus', '');
+            offerSave(entries, book.name || book.title || 'Scripted lorebook');
+        } finally {
+            state.converting = '';
+            render();
+        }
+    };
+
+    // ── capture ───────────────────────────────────────────────────────────────
+    const capture = async () => {
+        if (state.extracting || !closedBooks().length) return;
+        state.extracting = true;
+        state.extractPhase = 'Collecting entries…';
+        render();
+        try {
+            const payload = await captureJanitorLore(item, phase => {
+                state.extractPhase = phase;
+                render();
+            });
+            const raw = String(payload.lorebookText ?? '');
+            // Public entries are injected verbatim into the same prompt, so they
+            // are cut back out rather than rebuilt as closed content.
+            const contents = publicEntryContents(jsonBooks());
+            state.captured = withoutPublicEntries(raw, contents);
+            if (!state.avatar && payload.file) state.avatar = null;
+            if (!state.character && payload.character) state.character = payload.character;
+            if (!state.name) state.name = (state.character?.data?.name || item.name || 'Character') + ' — Closed Lorebook';
+            if (!state.captured.trim()) toastr.warning('The capture recovered no closed lorebook text.', "Weaver's Vault lorebooks");
+        } catch (error) {
+            setStatus('.wv-ccapturestatus', error.message);
+            toastr.error(error.message, "Weaver's Vault capture failed");
+            ledgerFail(item, 'capture', failureReason(error, error.status));
+        } finally {
+            state.extracting = false;
+            state.extractPhase = '';
+            render();
+        }
+    };
+
+    // ── build ─────────────────────────────────────────────────────────────────
+    const build = async () => {
+        if (state.building || !state.captured.trim()) return;
+        const plan = planFor(state.captured, false);
+        const name = (state.name || ((state.character?.data?.name || item.name || 'Character') + ' — Closed Lorebook')).trim();
+        const go = confirm('Build \'' + name + '\' with your active LLM?\n\n'
+            + plan.requests.length + ' request(s), no output cap.\n\nThis spends tokens on that account.');
+        if (!go) return;
+        state.building = true;
+        state.elapsed = 0;
+        state.buildProgress = null;
+        render();
+        const timer = setInterval(() => { state.elapsed += 1; render(); }, 1_000);
+        try {
+            const entries = await modelCall(plan, (done, total) => {
+                state.buildProgress = total > 1 ? [done, total] : null;
+                render();
+            });
+            state.built = { name, entries, model: config.model || (profiles.find(entry => entry.id === state.profileId) || profiles[0])?.model || '' };
+            state.name = name;
+        } catch (error) {
+            console.error('[' + extensionName + '] lorebook build failed', error);
+            const measurable = error instanceof RebuildError;
+            setStatus('.wv-cbuildstatus', measurable && error.part
+                ? 'Failed at part ' + error.part + ' of ' + error.total + ' — ' + error.message
+                : 'Failed: ' + error.message);
+            toastr.error(error.message + (error.resumable ? ' The sheet is still open; press Build to retry.' : '. Nothing was saved.'), "Weaver's Vault rebuild");
+        } finally {
+            clearInterval(timer);
+            state.building = false;
+            state.buildProgress = null;
+            render();
+        }
+    };
+
+    // ── save ──────────────────────────────────────────────────────────────────
+    const currentName = () => {
+        const typed = $('.wv-cname')?.value.trim();
+        return typed || state.built?.name || 'Lorebook';
+    };
+
+    const save = async () => {
+        if (!state.built) return;
+        const name = uniqueWorldName(currentName());
+        try {
+            await saveEntries(state.built.entries, name);
+            toastr.success('Saved \'' + name + '\'', "Weaver's Vault");
+            render();
+        } catch (error) {
+            setStatus('.wv-csavestatus', 'Save failed: ' + error.message);
+            toastr.error(error.message, "Weaver's Vault");
+        }
+    };
+
+    const exportJson = () => {
+        if (!state.built) return;
+        try {
+            const name = currentName();
+            downloadTextFile(name.replace(/[^\w\- ]+/g, '').trim() + '.json',
+                JSON.stringify(worldInfoFor(name, state.built.entries), null, 2));
+            markDelivered();
+            toastr.success('Exported ' + name + '.json', "Weaver's Vault");
+            render();
+        } catch (error) {
+            setStatus('.wv-csavestatus', 'Export failed: ' + error.message);
+        }
+    };
+
+    // ── chrome ────────────────────────────────────────────────────────────────
+    const close = () => {
+        if (busy()) return;
+        if (captureConfirmClose({ delivered: state.delivered, work: Boolean(state.captured || state.built) })) {
+            const go = confirm("The lorebook hasn't been saved or exported yet. Closing now discards the extraction progress.");
+            if (!go) return;
+        }
+        overlay.remove();
+    };
+
+    const goBack = () => {
+        const step = captureBack({ stage: stage(), built: Boolean(state.built), busy: busy() });
+        if (step === 'held' || step === 'close') return;
+        if (step === 'build') { state.built = null; render(); return; }
+        // build -> collect drops the capture and everything derived from it.
+        state.captured = '';
+        state.built = null;
+        state.buildProgress = null;
+        render();
+    };
+
+    $('.wv-cclose').addEventListener('click', close);
+    $('.wv-cback').addEventListener('click', goBack);
+    overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
+    overlay.querySelectorAll('.wv-csechead').forEach(head => head.addEventListener('click', () => {
+        const body = overlay.querySelector('.wv-csecbody[data-sec="' + head.dataset.sec + '"]');
+        if (!body) return;
+        body.hidden = !body.hidden;
+        head.classList.toggle('on', !body.hidden);
+    }));
+    $('.wv-ccapture').addEventListener('click', capture);
+    $('.wv-useimport').addEventListener('click', () => {
+        state.captured = state.importLore;
+        if (!state.name) state.name = (state.character?.data?.name || item.name || 'Character') + ' — Closed Lorebook';
+        render();
+    });
+    $('.wv-cbuild').addEventListener('click', build);
+    $('.wv-cpreview').addEventListener('click', () => {
+        const plan = planFor(state.captured, false);
+        const sheet = document.createElement('div');
+        sheet.className = 'wv-mode-overlay';
+        const first = plan.requests[0] || [];
+        sheet.innerHTML = '<div class="wv-csheet wv-cpreviewsheet"><div class="wv-modehandle"></div>'
+            + '<div class="wv-modehead">Prompt sent to the build LLM</div>'
+            + '<div class="wv-cnote">' + (plan.requests.length > 1
+                ? 'The extracted content is too long for one request, so the build sends ' + plan.requests.length + ' requests one after another. Shown here is the first one.'
+                : '') + '</div>'
+            + '<pre class="wv-cpre wv-cpreviewpre">' + esc(first.map(message => '[' + message.role + ']\n' + message.content).join('\n\n')) + '</pre>'
+            + '<div class="wv-cactions"><button class="wv-abtn wv-abtn-neutral wv-cpreviewclose" type="button"><span class="wv-abtnlabel">Close</span></button></div></div>';
+        root.appendChild(sheet);
+        sheet.querySelector('.wv-cpreviewclose').addEventListener('click', () => sheet.remove());
+        sheet.addEventListener('click', event => { if (event.target === sheet) sheet.remove(); });
+    });
+    $('.wv-csave').addEventListener('click', save);
+    $('.wv-cexport').addEventListener('click', exportJson);
+    $('.wv-cdltext').addEventListener('click', () => downloadTextFile('extracted-lorebook.txt', state.captured, 'text/plain'));
+    $('.wv-cdltext2').addEventListener('click', () => downloadTextFile('extracted-lorebook.txt', state.captured, 'text/plain'));
+    $('.wv-cdownloadall').addEventListener('click', downloadAll);
+    $('.wv-cpubrows').addEventListener('click', async event => {
+        const button = event.target?.closest('[data-act]');
+        if (!button) return;
+        const book = bookByKey(button.dataset.key);
+        if (!book) return;
+        try {
+            if (button.dataset.act === 'convert') await convertScript(book);
+            else await savePublicBook(book);
+            render();
+        } catch (error) {
+            toastr.error(error.message, "Weaver's Vault lorebooks");
+        }
+    });
+
+    render();
+    if (state.importing) {
+        (async () => {
+            try {
+                const result = await characterImport({ onPhase: phase => {
+                    const step = $('.wv-cphasestep');
+                    if (step) step.textContent = phase;
+                } });
+                if (result) {
+                    state.avatar = result.avatar || null;
+                    state.character = result.character || state.character;
+                    if (result.loreText) state.importLore = String(result.loreText);
+                }
+            } catch (error) {
+                toastr.error(error.message, "Weaver's Vault import failed");
+            } finally {
+                state.importing = false;
+                render();
+            }
+        })();
+    }
+    loadBooks();
+}
+
+// ─── The import workflow (Glaze character_detail_screen.dart:651-698) ────────
+//
+// One Import button, one conditional sheet. The options exist only when the
+// character actually lists lorebooks, and the capture sheet behind them is the
+// only place a lorebook is pulled: a plain import never attaches books, and a
+// closed book is never offered as something that can be downloaded.
+
+/**
+ * The options sheet: three rows, each a whole mode.
+ * @param {{ item: object, character: ?object, source: 'chub'|'janitor',
+ *   meta?: ?object, popup?: ?HTMLElement, fab?: ?HTMLElement, status?: ?HTMLElement,
+ *   closed?: boolean, bookCount?: number }} options
+ */
+function showImportOptions({ item, character = null, source, meta = null, popup = null, fab = null, status = null, closed = false, bookCount = 1 }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'wv-mode-overlay';
+    const rows = importOptions({ bookCount }).map(option =>
+        '<button data-mode="' + option.mode + '">'
+        + '<span class="fa-solid ' + option.icon + ' wv-modeicon"></span>'
+        + '<span class="wv-modelabels"><span class="wv-modelabel">' + escapeHtml(option.label) + '</span>'
+        + '<span class="wv-modehint">' + escapeHtml(option.hint) + '</span></span>'
+        + '</button>').join('');
+    overlay.innerHTML =
+        '<div class="wv-modesheet">'
+        + '<div class="wv-modehandle"></div>'
+        + '<div class="wv-modehead">Import options</div>'
+        + '<div class="wv-modecard">' + rows + '</div>'
+        + '</div>';
+    root.appendChild(overlay);
+
+    const finishChub = (mode) => {
+        const detail = root.querySelector('.wv-detail');
+        if (detail) detail.hidden = true;
+        if (mode === 'lorebooks') importChubLorebookOnly(item, character);
+        else importChubCharacter(item, character, mode === 'character+lorebooks');
+    };
+
+    const importJanitorCharacter = async ({ onPhase = () => {} } = {}) => {
+        if (!closed) {
+            const avatar = await importJannyCharacter(item, character, '/janitor/card', janitorFiles);
+            return { avatar, character, loreText: null };
+        }
+        // A closed definition IS the capture: the same run that assembles the
+        // prompt returns both the card and the lorebook text, so it is never
+        // run twice for one import.
+        const payload = await captureJanitorLore(item, onPhase);
+        const avatar = await importJannyCharacter(item, payload.character, '/janitor/capture',
+            new Map([[item.fullPath, payload.file]]));
+        return { avatar, character: payload.character, loreText: payload.lorebookText ?? null };
+    };
+
+    overlay.addEventListener('click', async event => {
+        const mode = event.target?.closest('button')?.dataset?.mode;
+        if (event.target === overlay) { overlay.remove(); return; }
+        if (!mode) return;
+        overlay.remove();
+        if (source === 'chub') { finishChub(mode); return; }
+        if (mode === 'lorebooks') {
+            openCaptureSheet({ item, meta, character: null });
+            return;
+        }
+        if (mode === 'character+lorebooks') {
+            openCaptureSheet({ item, meta, character, characterImport: importJanitorCharacter });
+            return;
+        }
+        if (closed) { await recoverJanitorCard(item, popup, fab, status); return; }
+        await importJannyCharacter(item, character, '/janitor/card', janitorFiles);
+    });
+}
+
+/**
+ * The button's whole job: import the character, and pull lorebooks only when
+ * the user asked to. No books attached means no sheet at all.
+ */
+function openImportFlow({ item, character, popup, closed = false, report = null }) {
+    if (item.source === 'saucepan') { importSaucepanCharacter(item, character); return; }
+    if (item.source === 'janny') { importJannyCharacter(item, character); return; }
+    if (item.source === 'chub') {
+        const book = character?.data?.character_book;
+        if (book) {
+            showImportOptions({ item, character, source: 'chub', bookCount: 1 });
+        } else {
+            importChubCharacter(item, character, false);
+        }
+        return;
+    }
+    const meta = report?.meta ?? null;
+    const status = popup.querySelector('.wv-recoverstatus');
+    const fab = popup.querySelector('.wv-dfab');
+    const refs = lorebookRefs(meta);
+    if (!refs.length) {
+        // Nothing to ask about: the plain import, which for a closed card is
+        // the capture that recovers its definition.
+        if (closed) recoverJanitorCard(item, popup, fab, status);
+        else importJannyCharacter(item, character, '/janitor/card', janitorFiles);
+        return;
+    }
+    showImportOptions({
+        item,
+        character,
+        source: 'janitor',
+        meta,
+        popup,
+        fab,
+        status,
+        closed,
+        bookCount: refs.length,
+    });
+}
+
+/** One JanitorAI capture, with the raw lorebook text the rebuild needs. */
+async function captureJanitorLore(item, onPhase = () => {}) {
+    const started = Date.now();
+    const timer = setInterval(() => {
+        onPhase('Capturing the prompt… ' + Math.round((Date.now() - started) / 1000) + 's');
+    }, 1_000);
+    try {
+        const r = await fetch('/api/weavers-vault/janitor/capture', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({ id: item.fullPath, lore: true }),
+        });
+        const payload = await r.json().catch(() => ({}));
+        if (!r.ok) {
+            throw vaultError(payload?.error || 'The capture answered ' + r.status,
+                payload?.code, r.status, payload?.reason);
+        }
+        return payload;
+    } finally {
+        clearInterval(timer);
+    }
+}
+
+/** Writes [text] as a download without a server round trip. */
+function downloadTextFile(filename, text, type = 'application/json') {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5_000);
+}
+
 /** A JanitorAI import: the card, then whichever of its books can be had. */
 async function importJanitorCard(item, character) {
     const avatar = await importJannyCharacter(item, character, '/janitor/card', janitorFiles);

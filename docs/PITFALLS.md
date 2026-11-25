@@ -961,3 +961,27 @@ pin that a closed card's bio lands on Info, that the drawer is empty without a b
 bios stay escaped, and that the renderer goes through those helpers rather than an inline copy.
 Measured in the shipped stylesheet: note, first tag chip, section label text and bio box all start at
 the same 16px inset (608px wide inside a 640px window), no horizontal overflow.
+
+## 47. A flex column sheet squashes its content instead of scrolling it, and `display: flex` beats `[hidden]`
+
+**Symptom.** The capture sheet at 360x640 showed all eight lorebook rows and the whole build
+group squeezed into 552 px: no scrollbar, `body.scrollHeight === body.clientHeight` (449 = 449),
+every row 42 px tall instead of 54, and the extracted-content `<pre>` clipped to its own
+scroller that a 1 518 px document had 242 px for. Separately, hiding a stage with the `hidden`
+attribute left it on screen, because `.wv-cempty { display: flex }` is an author rule and the
+UA `[hidden] { display: none }` is not.
+
+**Cause.** `.wv-cbody` is a flex column inside a max-height-capped flex column. Flex items
+shrink by default, so the children gave up height to fit the cap instead of overflowing the
+scroller. `overflow-y: auto` only helps when the content actually overflows.
+
+**Rule.** A scrolling flex column sets `flex: 1 1 auto; min-height: 0` on itself and
+`flex: none` on its children. Any element that is hidden by the `hidden` attribute and also
+has an author `display` rule needs an explicit `[hidden] { display: none !important }`
+scope.
+
+**Check.** `tests/vault/import-flow.test.js` "capture sheet styles" pins both rules
+(`.wv-cbody > * { flex: none }` via the body rule + the `[hidden]` scope), and the measured
+numbers are in the harness run: 360x640 sheet 340x552 with `bodyScroll` 940 > `bodyClient`
+450 after the fix, 0 px horizontal overflow at both 360 and 728.
+

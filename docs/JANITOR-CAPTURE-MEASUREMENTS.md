@@ -178,6 +178,39 @@ blocks with markdown image links. That is why blank-line splitting shreds them i
 sheet's own formatting *is* blank lines. Any rebuild has to segment on content (a `Servant Name:`
 block starts an entry) and re-host 194 sprite URLs that currently point at the site's CDN.
 
+## 2e. Rebuilding the capture into native world info
+
+The 778 blocks split back into **316 entries** on line-start markers (`Servant Name:` or `Name:`, optionally
+after a `---` or `###` line). Sizes: min 656, median 2,863, max 27,144 chars (the last one is Katya
+Kambanellis plus the Clock Tower departments, one deliberately combined entry). Total 1,020,289 chars.
+
+**Keys come from the author's list, not from guessing.** 295 of 316 entries matched a row of the
+996-keyword table and took its keywords verbatim; 21 derived a key from their own name (the NPCs —
+Rin Tohsaka, Shirou Emiya, Lord El-Melloi II, …). 895 keys in total, right-skewed to 2-4 per entry.
+
+**A matching trap worth remembering.** Normalizing a name by *deleting* its parenthetical collapses
+`Artoria (Summer)` to `Artoria`, which then matched the base `Artoria` **key** and handed the Summer
+entry the Saber keywords. Rule: match strictly (parentheses preserved) first, then retry with
+parentheses turned into word separators, and always eyeball a few variants of one family afterwards.
+After the fix `Artoria Pendragon` → Saber keys, `Artoria (Summer)` → `Artoria Summer / Artoria (Archer)
+/ Artoria (Summer)`, Lily and Lancer likewise.
+
+**Provenance is asserted, not assumed.** Every entry's content is checked to be a contiguous substring
+of the captured union (316/316 pass, 0 miss). Nothing was reworded, nothing invented.
+
+Output: `data/default-user/worlds/Fate Limitless (Rebuilt).json` (1.54 MB), `position: 4` with
+`depth: 10` — the depth the site itself reports in `settings: {"depth": 10}` — the Grail War Rules
+entry `constant: true`, the remaining 315 keyed. Verified through `POST /api/worldinfo/get`: 316
+entries, 1,020,289 chars.
+
+**This is the answer to "the model cannot emit the JSON":** it never has to. The file is 1.54 MB and
+was written by a script from captured text; the model's role is at most to write *keys* or *prose* for
+entries that need it, a few hundred at a time.
+
+Open: 194 sprite URLs still point at `ella.janitorai.com`; and how many entries fire per message is
+now governed by the world-info budget (default 25% of context) exactly as the site's own selection
+governed it.
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region

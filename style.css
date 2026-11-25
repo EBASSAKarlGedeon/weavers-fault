@@ -2321,12 +2321,25 @@
    the body is the only scrolling box, and the footer stays reachable while a
    long JavaScript source is previewed. Never a fixed-height clipped sub-box —
    the detail-sheet lesson in PITFALLS #44. */
-.wv-rbsheet {
+/* Compound selector on purpose: `.wv-modesheet` sets width by source order, and a
+   tie at one class each would break the day that rule moves. */
+.wv-modesheet.wv-rbsheet {
     display: flex;
     flex-direction: column;
     width: min(94vw, 540px);
     max-height: 86vh;
+    box-sizing: border-box; /* so 86vh means 86vh including padding, not +18px */
     padding-top: 0;
+}
+
+/* One field height for input and select. Their intrinsic heights differ by 2px
+   (46 vs 44, measured), which showed up as a ragged stack. An explicit height
+   centres the line; the horizontal padding stays because a select needs its right
+   inset to keep the text off the native arrow (it ran under it at 348px). */
+.wv-rbsheet .wv-tokeninput {
+    box-sizing: border-box;
+    height: 46px;
+    padding: 0 16px;
 }
 
 .wv-rbsheet .wv-modehead {
@@ -2337,9 +2350,21 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     padding: 0 20px 4px;
+}
+
+/* The body is the only thing that gives: without this, the sheet's max-height
+   squeezes the fields themselves (a 46px input measured 18px, text touching the
+   border). Only the scroll box may shrink. */
+.wv-rbscroll > * {
+    flex: 0 0 auto;
+}
+
+.wv-rbfoot {
+    flex: 0 0 auto;
 }
 
 .wv-rbhint {
@@ -2381,9 +2406,12 @@
     margin: 0;
 }
 
+/* Container-driven, not a media query: the sheet is 540px on a desktop window and
+   ~348px on a phone, and `auto-fit` drops to one column on its own (2 columns at
+   498px available, 1 at 306px — measured). */
 .wv-rbtoggles {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 6px 14px;
 }
 

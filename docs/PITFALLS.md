@@ -909,3 +909,28 @@ box inside it.
 `max-height: none` and carries no pixel value, the closed rule keeps its clamp, and the toggle reads
 `scrollHeight` and releases to `none`. Measured after the fix in the same harness: scroll area
 **6160px**, body painted 5495px of its 5665px content — the last line sits inside the scrollable sheet.
+
+## 45. A height-capped flex sheet squeezes the fields instead of scrolling
+
+**Symptom.** The rebuild sheet looked right in the screenshot that had no height cap, and wrong in the
+app: text inputs were 18px tall with the placeholder touching the border, the select was 2px taller than
+the inputs beside it, and the body showed no scrollbar because nothing overflowed — the fields had
+shrunk to fit instead. The footer stayed visible, which made it look intentional.
+
+**Measured cause.** `.wv-rbsheet` is a flex column with `max-height: 86vh`. Flex items default to
+`flex-shrink: 1`, so when the content was taller than the cap the browser shrank *every* child, including
+the 46px inputs (measured 18px computed height), instead of letting the scroll box take the overflow.
+`box-sizing` compounded it: without an explicit border-box the sheet's 86vh excluded its 1px border and
+16px bottom padding, so a 86vh cap measured 706px at an 800px viewport.
+
+**Rule.** In a height-capped flex column, only the scroll container may shrink: the body gets
+`flex: 1 1 auto; min-height: 0`, and every other child gets `flex: 0 0 auto`. Set `box-sizing: border-box`
+on the capped element so the cap is the box the user sees. Two fields meant to look alike get one
+explicit height — `<input>` and `<select>` differ by 2px at the same padding (44 vs 46, measured) — and
+the select keeps its horizontal padding or its text runs under the native arrow (seen at 348px).
+
+**Check.** `tests/vault/vault-client-contracts.test.js` pins the three rules (`flex: 1 1 auto` on the body,
+`flex: 0 0 auto` on its children, a single `height` on the fields); the harness measurement is in the
+commit that introduced it. Measured after the fix at a 540px and a 348px sheet: fields 46/46/46, insets
+21/21/21/21, button labels off-centre by 0.00px, toggles 2 columns then 1, no horizontal overflow, and a
+430px cap scrolls 616px of body with the footer still inside the sheet.

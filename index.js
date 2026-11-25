@@ -3263,7 +3263,7 @@ function openRebuildSheet({ item, avatar, card, books, scripted, saved }) {
                     value="${escapeHtml(config.extra)}" spellcheck="false" />
                 <div class="wv-rbsection">Connection</div>
                 <select class="wv-tokeninput wv-rbprofile">
-                    ${profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${profile.id === chosen.profile.id ? 'selected' : ''}>${escapeHtml(profile.name || profile.id)} — ${escapeHtml(profile.model || '')}</option>`).join('')}
+                    ${profiles.map(profile => `<option value="${escapeHtml(profile.id)}" title="${escapeHtml(`${profile.name || profile.id} — ${profile.model || ''}`)}" ${profile.id === chosen.profile.id ? 'selected' : ''}>${escapeHtml(profile.name || profile.id)}</option>`).join('')}
                 </select>
                 <input class="wv-tokeninput wv-rbmodel" type="text" spellcheck="false"
                     placeholder="Model override (blank = the profile's model)" value="${escapeHtml(config.model)}" />
@@ -3290,6 +3290,22 @@ function openRebuildSheet({ item, avatar, card, books, scripted, saved }) {
     const pre = $('.wv-rbpre');
     const status = $('.wv-rbstatus');
     const buildButton = $('[data-rb="build"]');
+    const profileSelect = $('.wv-rbprofile');
+    const modelInput = $('.wv-rbmodel');
+
+    // The dropdown fits profile names; the model is the expensive fact, so it is
+    // spelled out on hover, in the field's placeholder, in the preview and in the
+    // confirm. A native select clipped 'name — model' at 348px without an ellipsis.
+    const selectedProfile = () => profiles.find(profile => profile.id === profileSelect.value) || chosen.profile;
+    const syncModelHint = () => {
+        modelInput.placeholder = `Model override — blank = ${selectedProfile().model || selectedProfile().name || 'the profile model'}`;
+    };
+    profileSelect.addEventListener('change', () => {
+        syncModelHint();
+        details.hidden = true;
+        summary.textContent = 'Press Preview to price the request.';
+    });
+    syncModelHint();
 
     // Parts that already came back OK, so a failed part 14 does not re-bill 1-13
     // (§5.3). Keyed by profile + model + the exact messages, which means a
@@ -3339,8 +3355,8 @@ function openRebuildSheet({ item, avatar, card, books, scripted, saved }) {
                 : message.content,
         }));
         pre.textContent = JSON.stringify({
-            profile: $('.wv-rbprofile').selectedOptions[0]?.textContent || '',
-            model: $('.wv-rbmodel').value.trim() || 'profile default',
+            profile: selectedProfile().name || selectedProfile().id,
+            model: modelInput.value.trim() || selectedProfile().model || 'profile default',
             max_tokens: 'omitted (boundless)',
             temperature: REQUEST_TEMPERATURE,
             messages: clipped,
@@ -3367,9 +3383,9 @@ function openRebuildSheet({ item, avatar, card, books, scripted, saved }) {
     buildButton.addEventListener('click', async () => {
         const picked = describe();
         if (!picked) return;
-        const profileId = $('.wv-rbprofile').value;
-        const profile = profiles.find(p => p.id === profileId) || chosen.profile;
-        const model = $('.wv-rbmodel').value.trim();
+        const profileId = profileSelect.value;
+        const profile = selectedProfile();
+        const model = modelInput.value.trim();
         const label = model || profile.model || profile.name;
         saveRebuildConfig({
             profileId,

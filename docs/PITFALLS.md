@@ -750,3 +750,26 @@ fix returned `chatCount: 996,977` for the same card, matching the site as it gro
 
 **Check.** `normalizeJanitorHit({ stats: { chat: 26787, message: 994892 } }).chatCount === 994892`, and
 the card's badge must read the same `NNNk` the site shows for it.
+
+## 39. A module-level constant left behind when code moves
+
+**Symptom.** Right after the engine was split out of `weavers-vault-browser.js` into
+`weavers-vault-chrome-backend.js` (EMBEDDED-ENGINE-PLAN Phase 1), the first real request died with
+`ReferenceError: BROWSER_CANDIDATES is not defined` inside `findBrowserBinary()` — i.e. the vault could
+not find a browser at all, on a suite that was green at that moment.
+
+**Measured cause.** The move was done by slicing the old file into fragments, and one slice ended at the
+*docblock above* `BROWSER_CANDIDATES` instead of after the array: the helper moved, the list it reads
+did not. Nothing in the unit suite starts a browser — the seam tests build a session and stub the
+backend, and the route tests never call `start()` — so the only code that reads that constant ran for the
+first time in the smoke test (2.5 s in, at `findBrowserBinary`).
+
+**Rule.** When code moves between modules, move the module-level state it closes over in the same
+commit, and prove the move with something that *executes* the moved path. A green suite says the move is
+syntactically consistent, not that it is complete: `node --check` cannot see a missing binding either.
+The cheap end-to-end proof is a local origin — `host: '127.0.0.1'`, `origin: 'http://127.0.0.1:8000/'`
+needs no site traffic and exercises spawn → attach → wait → fetch → reveal → park → dispose.
+
+**Check.** A session must start against a local origin, and
+`tests/vault/vault-client-contracts.test.js` pins that `BROWSER_CANDIDATES` is declared and read by
+`findBrowserBinary()` so the list cannot be left behind again.

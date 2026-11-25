@@ -1061,3 +1061,29 @@ card: before — `Failed: API request failed`, payload `model: google/gemma-4-31
 profile `Cheaper`; after — payload logged `model: nvidia/nemotron-3.5-lightning:free,
 max_tokens: undefined`, sheet reached Saving with "Built 24 entries" (24/24 keyed, 16 049 content
 chars, JSON pane 45 345 chars parsing clean).
+
+## #51 The settings template was requested from a folder named after the display name
+
+**Symptom.** The Extensions drawer never appeared; every page load logged
+`[Weaver's Vault] settings drawer failed to mount` with a jQuery jqXHR whose status was
+404 and whose body was the server's "Not Found" page. The same URL, pasted into the address
+bar or fetched from the console, returned 200 with the nine-hundred-byte template.
+
+**Measured cause.** mountSettings() built its URL from extensionName, and in this file
+extensionName is the pretty name — "Weaver's Vault", line 102 — not the folder. The request
+went to /scripts/extensions/Weaver's Vault/settings.html (space and apostrophe, so the server
+only saw /scripts/extensions/Weaver and 404'd). The folder is the constant MODULE =
+weavers-vault, which already keys extension_settings[MODULE].
+
+**Rule.** Any path into the extension directory — templates, images, JSON fixtures — is built
+from MODULE, never from extensionName. extensionName is a log prefix and nothing else. When a
+static asset "404s while the file obviously exists", record the URL actually built before
+suspecting the server: the fetch path, not the file, is usually wrong.
+
+**Check.** tests/vault/import-flow.test.js, describe "the settings drawer chooses the rebuild
+profile": asserts the client builds the template path from MODULE and mounts into
+#extensions_settings2. Live: drawer present in the Extensions panel with five options
+(Follow the active profile (Openrouter), Cheaper — google/gemma-4-31b-it:free, GLM Flash —
+z-ai/glm-5.3-flash, NanoGPT — z-ai/glm-5.1:thinking, Openrouter —
+nvidia/nemotron-3.5-lightning:free) and the note reading "Rebuilds send to 'Openrouter'
+(nvidia/nemotron-3.5-lightning:free), following the active profile.".

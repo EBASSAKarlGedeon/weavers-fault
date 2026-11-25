@@ -3141,3 +3141,29 @@
     opacity: 0.75;
 }
 
+/* Extensions panel drawer: the only place the rebuild profile is chosen. */
+.wv-settings .wv-setrow {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wv-settings .wv-setlabel {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.wv-settings .wv-sethint {
+    opacity: .75;
+    line-height: 1.35;
+}
+
+.wv-settings .wv-setselect {
+    width: 100%;
+}
+
+.wv-settings .wv-setnote {
+    display: block;
+    margin-top: 6px;
+    opacity: .75;
+}

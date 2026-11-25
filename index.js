@@ -3204,6 +3204,72 @@ function saveRebuildConfig(patch) {
     saveSettingsQuiet();
 }
 
+/**
+ * The rebuild profile is chosen in the Extensions panel (settings.html), not on a
+ * sheet: a rebuild spends money, and a sheet that silently fell back to whatever
+ * profile happened to be active is how a build lands on an account the user forgot
+ * about (PITFALLS #50). An empty value keeps the old behaviour — follow the active
+ * profile — so the setting is opt-in rather than a new required step.
+ */
+function rebuildProfileLabel(profile) {
+    return `${profile.name || profile.id} — ${profile.model || 'no model set'}`;
+}
+
+function rebuildProfileTarget() {
+    const profiles = rebuildProfiles();
+    const config = rebuildConfig();
+    const chosen = profiles.find(profile => profile.id === config.profileId);
+    if (chosen) return { profile: chosen, followed: false };
+    const activeId = extension_settings.connectionManager?.selectedProfile || '';
+    return { profile: profiles.find(profile => profile.id === activeId) || null, followed: true };
+}
+
+function refreshRebuildProfileSelect() {
+    const select = document.getElementById('wv-rebuild-profile');
+    if (!select) return;
+    const profiles = rebuildProfiles();
+    const config = rebuildConfig();
+    const activeId = extension_settings.connectionManager?.selectedProfile || '';
+    const active = profiles.find(profile => profile.id === activeId);
+    const follow = active
+        ? `Follow the active profile (${active.name || active.model})`
+        : 'Follow the active profile (none selected)';
+    select.innerHTML = [`<option value="">${escapeHtml(follow)}</option>`]
+        .concat(profiles.map(profile => `<option value="${escapeHtml(profile.id)}">${escapeHtml(rebuildProfileLabel(profile))}</option>`))
+        .join('');
+    const known = profiles.some(profile => profile.id === config.profileId);
+    select.value = known ? config.profileId : '';
+    const note = document.getElementById('wv-rebuild-profile-note');
+    if (!note) return;
+    const target = rebuildProfileTarget();
+    if (!target.profile) {
+        note.textContent = 'No chat-completion profile is available. Add one in Connection Manager first.';
+        return;
+    }
+    const shown = target.profile.name || target.profile.id;
+    const model = target.profile.model || 'no model set';
+    note.textContent = `Rebuilds send to '${shown}' (${model})${target.followed ? ', following the active profile' : ''}.`;
+}
+
+async function mountSettings() {
+    try {
+        // The folder is MODULE, not extensionName: the pretty name has an apostrophe
+        // and a space, and as a path it 404s.
+        const html = await $.get(`/scripts/extensions/${MODULE}/settings.html`);
+        $('#extensions_settings2').append(html);
+        refreshRebuildProfileSelect();
+        $('#wv-rebuild-profile').on('change', function () {
+            saveRebuildConfig({ profileId: String($(this).val() || '') });
+            refreshRebuildProfileSelect();
+            toastr.success('Rebuild profile saved.', "Weaver's Vault");
+        });
+        // The profile list and the active profile both change from elsewhere.
+        $(document).on('click', '#wv-settings .inline-drawer-toggle', refreshRebuildProfileSelect);
+    } catch (error) {
+        console.error(`[${extensionName}] settings drawer failed to mount`, error);
+    }
+}
+
 // Sync on purpose: planBuild() must price a request before it is sent, and the
 // async counter belongs to rendering, not to the plan.
 function rebuildCountTokens() {
@@ -4144,7 +4210,8 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         if (state.converting) return;
         if (book.jsSource === undefined) throw new Error('The script source could not be read.');
         const plan = planFor(book.jsSource, true);
-        const go = confirm('Rebuild \'' + (book.title || book.name) + '\' with your active LLM?\n\n'
+        const go = confirm('Rebuild \'' + (book.title || book.name) + '\' with \'' + (rebuildProfile?.name || rebuildProfile?.id || 'the active profile') + '\''
+            + ' (' + (config.model || rebuildProfile?.model || 'no model set') + ')?\n\n'
             + plan.requests.length + ' request(s). Output cap: none.\n\nThis spends tokens on that account.');
         if (!go) return;
         state.converting = keyOf(book);
@@ -4198,7 +4265,10 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         if (state.building || !state.captured.trim()) return;
         const plan = planFor(state.captured, false);
         const name = (state.name || ((state.character?.data?.name || item.name || 'Character') + ' — Closed Lorebook')).trim();
-        const go = confirm('Build \'' + name + '\' with your active LLM?\n\n'
+        const targetName = rebuildProfile ? (rebuildProfile.name || rebuildProfile.id) : 'the active profile';
+        const targetModel = config.model || rebuildProfile?.model || '';
+        const go = confirm('Build \'' + name + '\' with \'' + targetName + '\''
+            + (targetModel ? ' (' + targetModel + ')' : '') + '?\n\n'
             + plan.requests.length + ' request(s), no output cap.\n\nThis spends tokens on that account.');
         if (!go) return;
         state.building = true;
@@ -4657,6 +4727,7 @@ jQuery(async () => {
     console.log(`[${extensionName}] Loading…`);
     try {
         settings();
+        await mountSettings();
         if (!addLauncher()) {
             // Top bar not ready yet; retry shortly (same as RPG engine's approach).
             setTimeout(addLauncher, 2000);

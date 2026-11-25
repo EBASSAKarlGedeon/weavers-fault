@@ -64,6 +64,7 @@ not happen within one send.
 | 10 short entries (`CC01`..`CC10`, 15 chars each) | 10 | 188 | all 10 spliced |
 | 12 entries of exactly 200 chars (`P01`..`P12`) | 12 | 2,422 | all 12 spliced, each exactly 200 |
 | 1 x 4,000 chars (`Q00`) + 20 x 600 chars (`Q01`..`Q20`) | 21 | 16,040 | all 21 spliced, nothing truncated |
+| 60 entries of exactly 1,000 chars (`R00`..`R59`) | 60 | 60,178 | all 60 spliced, nothing truncated |
 
 **M7 — no entry cap below 21.** Twenty-one entries arrived in one prompt.
 
@@ -75,6 +76,12 @@ even though the Fate books average ~670 chars per entry.
 message (`triggerSystemChars: 16175`). Whatever the real ceiling is, it is not small: the per-probe
 batch can hold dozens of realistic entries, so the coverage loop is not forced into one-entry
 probes.
+
+**M11 — no budget at 60,178 chars (~15k tokens) either.** The `R` fixture spliced all 60 entries in
+one system message (`triggerSystemChars: 60313`). The region held 60 blocks of 1,001 chars; the
+first (`R00`) and the last (`R59`) were both complete, closing sentinel present, so nothing was
+trimmed at either end. The binding constraint is therefore the chat's own context window, not a
+lorebook budget — a book of realistic 500-700-char entries can be probed in batches of ~50-100.
 
 ## 3. The defect this exposed in our own counter
 
@@ -103,9 +110,9 @@ entry is replaced as well. This single fact explains every "cap" observation abo
    content (an LLM pass that respects markdown structure), and must not claim an exact entry count.
 2. **Every entry body we emit is verifiable.** Acceptance can be mechanical: the body must appear
    verbatim in a capture where its key fired.
-3. **Batching is viable.** At least 21 entries / 16k chars per probe means a 300-entry book needs on
-   the order of 15-20 probes to *see* everything once, if every key fires at once — cheap enough to
-   run many times for coverage.
+3. **Batching is viable, and the batch is large.** At least 60 entries / 60k chars per probe, with
+   no truncation at either end. A 300-entry Fate book could be *seen* in ~5 probes if every key
+   fired at once; the real cost is key coverage, not the splice.
 4. **Key choice is the limiting factor, not the budget.** The trigger message is the card text plus
    greetings, so keys that do not occur in the card text can never fire until the capture learns to
    send a caller-supplied message (`triggerText` is already threaded into `captureJanitorCard` but
@@ -115,10 +122,13 @@ entry is replaced as well. This single fact explains every "cap" observation abo
 
 ## 6. Open questions (next probes)
 
-- Where is the real ceiling? 16,040 chars is the largest measured splice; a 60-entry / 60k-char
-  fixture would show whether the site trims at a token budget or at the chat window.
-- Does the budget apply per card (all books share one splice) or per book? Fate has five books and
-  they all splice into one prompt, so this decides whether book attribution is a real problem.
+- Where is the real ceiling? 60,178 chars is the largest measured splice. The next step would be a
+  fixture that provably exceeds the chat window (e.g. 300k chars) to see whether the site trims the
+  region, drops entries, or refuses the send.
+- Does the region stay one block when a card has several attached books? Fate has five, and they
+  all splice into the same prompt. Attribution turned out not to matter for rebuilding content (we
+  want the entries, not the book they came from), but ordering and interleaving still need one
+  measurement with two attached books.
 - Does a *published* script behave differently from a draft? The first two captures were with an
   unpublished book and produced zero lore; both had an unattached book, so attachment — not
   publication state — was the cause. Publication is confirmed working; draft behaviour is untested.

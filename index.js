@@ -3528,11 +3528,17 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         '<div class="wv-csheet" role="dialog" aria-label="Lorebooks">'
         + '<div class="wv-modehandle"></div>'
         + '<div class="wv-chead">'
-        + '<button class="wv-cback" type="button" title="Back"><span class="fa-solid fa-chevron-left"></span></button>'
         + '<div class="wv-ctitle">Lorebooks</div>'
+        + '<span class="wv-help" title="Public books are downloaded whole; closed ones are read out of the character\'s prompt and rebuilt into keyed entries.">?</span>'
+        + '<span class="wv-cspacer"></span>'
         + '<button class="wv-cclose" type="button" title="Close"><span class="fa-solid fa-xmark"></span></button>'
         + '</div>'
-        + '<div class="wv-cstrip"></div>'
+        // The back arrow lives in the crumb bar, the way Glaze puts it there
+        // rather than in the title bar (janitor_lorebook_capture_sheet.dart).
+        + '<div class="wv-cstrip">'
+        + '<button class="wv-cback" type="button" title="Back"><span class="fa-solid fa-arrow-left"></span></button>'
+        + '<div class="wv-crumbs"></div>'
+        + '</div>'
         + '<div class="wv-cbody">'
         + '<div class="wv-cstage-character wv-cempty" hidden>'
         + '<span class="wv-spinner"></span>'
@@ -3572,28 +3578,47 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         + '<div class="wv-cstatus wv-ccapturestatus" aria-live="polite"></div>'
         + '</div>'
         + '<div class="wv-cstage-build" hidden>'
+        // MenuGroup (Glaze menu_group.dart:254): 18/700 title, help tip, muted
+        // 12px description, then plain rows — no glass card, no caps label.
         + '<div class="wv-cgroup">'
-        + '<div class="wv-cgrouphead">Build with LLM</div>'
-        + '<div class="wv-cnote wv-cextnote"></div>'
-        + '<details class="wv-cdetails"><summary>Extracted content</summary><pre class="wv-cpre wv-cextpre"></pre></details>'
-        + '<button class="wv-abtn wv-abtn-neutral wv-cdltext" type="button"><span class="wv-abtnlabel">Download extracted content as .txt</span></button>'
+        + '<div class="wv-cghead"><span class="wv-cgtitle">Build with LLM</span>'
+        + '<span class="wv-help" title="The build reads the extracted text and writes keyed entries from it. Nothing else is saved.">?</span></div>'
+        + '<div class="wv-cgdesc wv-cextnote"></div>'
+        + '<button class="wv-cm wv-cdisc" type="button" aria-expanded="false">'
+        + '<span class="wv-cmbody"><span class="wv-cmlabel">Extracted content</span>'
+        + '<span class="wv-cmsub">Exactly what the build reads</span></span>'
+        + '<span class="fa-solid fa-chevron-down wv-cmchev"></span>'
+        + '</button>'
+        + '<div class="wv-cdiscbody" hidden><pre class="wv-cpre wv-cextpre"></pre></div>'
+        + '<button class="wv-cm wv-cdltext" type="button">'
+        + '<span class="fa-solid fa-align-left wv-cmicon"></span>'
+        + '<span class="wv-cmbody"><span class="wv-cmlabel">Download extracted content as .txt</span>'
+        + '<span class="wv-cmsub">Raw text, no entries or keys</span></span>'
+        + '</button>'
         + '</div>'
         + '<div class="wv-cgroup">'
-        + '<div class="wv-cgrouphead">Context for key inference</div>'
-        + '<div class="wv-cnote">Sent to the model so it can infer trigger keys — never written back as entries.</div>'
-        + '<div class="wv-ctoggles wv-cbuildtoggles"></div>'
-        + '<input class="wv-tokeninput wv-cbuildextra" type="text" placeholder="Extra names or aliases you know (optional)" spellcheck="false" />'
+        + '<div class="wv-cghead"><span class="wv-cgtitle">Context for key inference</span>'
+        + '<span class="wv-help" title="Sent to the model so it can infer trigger keys. Never written back as entries.">?</span></div>'
+        + '<div class="wv-cgdesc">Sent to the model so it can infer trigger keys — never written back as entries.</div>'
+        + '<div class="wv-cbuildtoggles"></div>'
+        + '<button class="wv-cm wv-cswitchrow wv-cxrow" type="button" role="switch" aria-checked="false">'
+        + '<span class="wv-cmbody"><span class="wv-cmlabel">Extra names or aliases</span>'
+        + '<span class="wv-cmsub">Sent with the context so the model knows who else the book talks about.</span></span>'
+        + '<span class="wv-switch"><input type="checkbox" tabindex="-1" class="wv-cxtra" /><span class="wv-knob"></span></span>'
+        + '</button>'
+        + '<label class="wv-cfield wv-cxtrafield" hidden><span>Extra names or aliases you know (optional)</span>'
+        + '<input class="wv-tokeninput wv-cbuildextra" type="text" placeholder="Comma separated, e.g. Ellie, El" spellcheck="false" /></label>'
         + '</div>'
         + '<div class="wv-cactions">'
-        + '<button class="wv-abtn wv-abtn-primary wv-cbuild" type="button"><span class="wv-abtnlabel">Build lorebook</span></button>'
-        + '<button class="wv-abtn wv-abtn-neutral wv-cpreview" type="button"><span class="wv-abtnlabel">Preview prompt</span></button>'
+        + '<button class="wv-abtn wv-abtn-primary wv-cbuild" type="button"><span class="fa-solid fa-wand-magic-sparkles wv-abtnicon"></span><span class="wv-abtnlabel">Build lorebook</span></button>'
+        + '<button class="wv-abtn wv-abtn-neutral wv-cpreview" type="button"><span class="fa-regular fa-eye wv-abtnicon"></span><span class="wv-abtnlabel">Preview prompt</span></button>'
         + '</div>'
-        + '<div class="wv-cnote">Building a lorebook may take a while, please be patient.</div>'
+        + '<div class="wv-cpatience"><span class="fa-regular fa-clock"></span><span>Building a lorebook may take a while, please be patient.</span></div>'
         + '<div class="wv-cstatus wv-cbuildstatus" aria-live="polite"></div>'
         + '</div>'
         + '<div class="wv-cstage-save" hidden>'
         + '<div class="wv-cgroup">'
-        + '<div class="wv-cgrouphead wv-cbuilt-head">Built 0 entries</div>'
+        + '<div class="wv-cghead"><span class="wv-cgtitle wv-cbuilt-head">Built 0 entries</span></div>'
         + '<label class="wv-cfield"><span>World info name</span><input class="wv-tokeninput wv-cname" type="text" spellcheck="false" /></label>'
         + '<div class="wv-cnote wv-cscope"></div>'
         + '<div class="wv-cactions">'
@@ -3636,6 +3661,10 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         delivered: false,
         context: { ...config.context },
         extra: config.extra || '',
+        // The extra box is sent only while its switch is on (Glaze's extra
+        // MenuSwitchItem + MenuFieldItem). Text already saved in settings keeps
+        // being sent, so turning the row off is the only way to drop it.
+        extraOn: Boolean(String(config.extra || '').trim()),
         name: '',
         partCache: new Map(),
         profileId: config.profileId,
@@ -3783,29 +3812,78 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         const stages = captureStages({ importing: state.importing });
         const strip = $('.wv-cstrip');
         strip.hidden = !state.importing && !hasFlow();
-        strip.innerHTML = stages.map(entry =>
-            '<span class="wv-cpill' + (entry.id === current ? ' on' : '') + '">' + esc(entry.label) + '</span>').join('');
+        // A breadcrumb, not a chip rail: `<- Collecting > Building > Saving` with
+        // the current step in the accent — Glaze's `_buildStepBar`.
+        $('.wv-crumbs').innerHTML = stages.map((entry, index) =>
+            (index ? '<span class="fa-solid fa-chevron-right wv-crumbsep"></span>' : '')
+            + '<span class="wv-crumb' + (entry.id === current ? ' on' : '') + '">' + esc(entry.label) + '</span>').join('');
         const back = $('.wv-cback');
         const step = captureBack({ stage: current, built: Boolean(state.built), busy: busy() });
-        back.hidden = step === 'close';
+        // Glaze keeps the arrow on every step; on the first one it closes the
+        // sheet rather than flattening the crumb bar.
+        back.hidden = false;
         back.disabled = step === 'held';
         back.classList.toggle('wv-cbackheld', step === 'held');
     };
 
+    // Glaze counts with the active tokenizer and falls back to ~4 chars/token
+    // (core/llm/tokenizer.dart:108). We only have the fallback, so every count
+    // shown here is that estimate.
+    const tokensOf = text => (String(text ?? '').trim() ? Math.ceil(String(text).trim().length / 4) : 0);
+
+    // The text of every source regardless of its switch: a row keeps showing
+    // what it would send after being turned off, exactly like ContextSourceTile,
+    // which receives `content` and `value` separately.
+    const sourceTexts = () => contextFor({
+        card: state.character,
+        books: state.books,
+        toggles: { card: true, catalog: true, scenario: true, greetings: true, lorebookDescs: true },
+    });
+
+    const CAPTURE_SOURCES = [
+        ['card', 'Character card'],
+        ['catalog', 'Card description on site'],
+        ['scenario', 'Scenario'],
+        ['greetings', 'First message(s)'],
+        ['lorebookDescs', 'Lorebook titles + descriptions'],
+    ];
+
     const renderToggles = () => {
         const container = $('.wv-cbuildtoggles');
-        const sources = [
-            ['card', 'Character card'],
-            ['scenario', 'Scenario'],
-            ['lorebookDescs', 'Lorebook titles + descriptions'],
-            ['greetings', 'Greetings'],
-        ];
-        container.innerHTML = sources.map(([key, label]) =>
-            '<label class="wv-rbtoggle"><input type="checkbox" data-ctx="' + key + '"'
-            + (state.context[key] ? ' checked' : '') + ' /> ' + esc(label) + '</label>').join('')
-            + '<label class="wv-rbtoggle wv-rboff"><input type="checkbox" disabled /> Catalog page (needs one extra site fetch)</label>';
-        container.querySelectorAll('[data-ctx]').forEach(box => {
-            box.addEventListener('change', () => { state.context[box.dataset.ctx] = box.checked; });
+        const texts = sourceTexts();
+        // One row per source: label + token count, a chevron that reveals the
+        // exact text, and the switch that decides whether it is sent.
+        container.innerHTML = CAPTURE_SOURCES.map(([key, label]) => {
+            const text = String(texts[key] ?? '').trim();
+            const sub = text
+                ? tokensOf(text) + ' tokens'
+                : (key === 'catalog' ? 'Needs one extra site fetch' : 'Nothing recovered');
+            return '<div class="wv-csrc" data-ctx="' + key + '">'
+                + '<div class="wv-csrcrow">'
+                + '<button class="wv-csrcmain" type="button" aria-expanded="false"' + (text ? '' : ' disabled') + '>'
+                + '<span class="wv-cmbody">'
+                + '<span class="wv-cmlabel">' + esc(label) + '</span>'
+                + '<span class="wv-cmsub">' + esc(sub) + '</span>'
+                + '</span>'
+                + (text ? '<span class="fa-solid fa-chevron-down wv-cmchev"></span>' : '')
+                + '</button>'
+                + '<label class="wv-switch"><input type="checkbox" data-switch="' + key + '"'
+                + (text ? (state.context[key] ? ' checked' : '') : ' disabled') + ' /><span class="wv-knob"></span></label>'
+                + '</div>'
+                + (text ? '<div class="wv-csrcbody" hidden><pre class="wv-cpre">' + esc(text) + '</pre></div>' : '')
+                + '</div>';
+        }).join('');
+        container.querySelectorAll('[data-switch]').forEach(box => {
+            box.addEventListener('change', () => { state.context[box.dataset.switch] = box.checked; });
+        });
+        container.querySelectorAll('.wv-csrcmain').forEach(button => {
+            button.addEventListener('click', () => {
+                const body = button.closest('.wv-csrc').querySelector('.wv-csrcbody');
+                if (!body) return;
+                body.hidden = !body.hidden;
+                button.setAttribute('aria-expanded', String(!body.hidden));
+                button.querySelector('.wv-cmchev').classList.toggle('on', !body.hidden);
+            });
         });
         $('.wv-cbuildextra').value = state.extra;
         $('.wv-cbuildextra').addEventListener('input', event => { state.extra = event.target.value; });
@@ -3871,11 +3949,17 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         // ── build ─────────────────────────────────────────────────────────────
         if (current === 'build') {
             const text = state.captured;
+            // Glaze's group description: "Extracted content · 3912 tokens".
             $('.wv-cextnote').textContent = text.trim()
-                ? 'Extracted content · ' + text.trim().split(/\n\s*\n/).length + ' blocks'
+                ? 'Extracted content · ' + tokensOf(text) + ' tokens'
                 : 'No closed lorebook text was found.';
             $('.wv-cextpre').textContent = text;
+            $('.wv-cdisc').hidden = !text.trim();
             $('.wv-cdltext').hidden = !text.trim();
+            const extraBox = $('.wv-cxtra');
+            extraBox.checked = state.extraOn;
+            $('.wv-cxrow').setAttribute('aria-checked', String(state.extraOn));
+            $('.wv-cxtrafield').hidden = !state.extraOn;
             $('.wv-cbuild').disabled = state.building || !text.trim();
             $('.wv-cpreview').disabled = state.building || !text.trim();
             $('.wv-cbuild').querySelector('.wv-abtnlabel').textContent = state.building
@@ -3992,7 +4076,7 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
     const contextNow = () => contextFor({
         card: state.character,
         books: state.books,
-        extra: state.extra,
+        extra: state.extraOn ? state.extra : '',
         toggles: state.context,
     });
 
@@ -4137,7 +4221,10 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
 
     const goBack = () => {
         const step = captureBack({ stage: stage(), built: Boolean(state.built), busy: busy() });
-        if (step === 'held' || step === 'close') return;
+        if (step === 'held') return;
+        // Nothing left to step back to: the arrow closes the sheet, as Glaze's
+        // `_stepBack` does, and `close()` keeps the discard guard.
+        if (step === 'close') { close(); return; }
         if (step === 'build') { state.built = null; render(); return; }
         // build -> collect drops the capture and everything derived from it.
         state.captured = '';
@@ -4148,6 +4235,14 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
 
     $('.wv-cclose').addEventListener('click', close);
     $('.wv-cback').addEventListener('click', goBack);
+    // DisclosureRow: the row header opens the exact text, nothing else.
+    $('.wv-cdisc').addEventListener('click', () => {
+        const body = $('.wv-cdiscbody');
+        body.hidden = !body.hidden;
+        $('.wv-cdisc').setAttribute('aria-expanded', String(!body.hidden));
+        $('.wv-cdisc .wv-cmchev').classList.toggle('on', !body.hidden);
+    });
+    $('.wv-cxrow').addEventListener('click', () => { state.extraOn = !state.extraOn; render(); });
     overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
     overlay.querySelectorAll('.wv-csechead').forEach(head => head.addEventListener('click', () => {
         const body = overlay.querySelector('.wv-csecbody[data-sec="' + head.dataset.sec + '"]');

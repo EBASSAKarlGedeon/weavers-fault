@@ -1007,3 +1007,24 @@ class rule such as `.wv-importmenu .wv-modecard button:hover` still wins.
 pins the reset ahead of the component rules and the zero-specificity wrapper; measured
 in the harness afterwards: menu `rgb(30, 30, 30)`, row background `rgba(0, 0, 0, 0)`,
 label `rgb(225, 227, 230)`.
+
+## 49. A generic class name reused from another component silently inherits its chrome
+
+**Symptom.** The rebuilt Building stage painted every menu row as its own rounded card
+(`rgba(255,255,255,.04)`, 11 px radius) with a 10 px gap instead of the flat rows Glaze
+draws. The markup was right, the screenshot was not.
+
+**Cause.** The new rows were classed `.wv-crow`, which the *collect* stage already uses for a
+book row (`.wv-crow { display: flex; gap: 10px; padding: 10px; border-radius: 11px;
+background: rgba(255,255,255,.04) }`, style.css). The new rules redefined `display`, `padding`
+and `color` but said nothing about `background` or `border-radius`, so the old declarations
+kept applying.
+
+**Rule.** Before classing a new component, grep `style.css` for the name. A component that
+needs different chrome gets its own prefix (`wv-cm*` for capture-sheet menu rows) rather than
+redefining a shared one; a subclass that must override every inherited visual adds the
+properties explicitly.
+
+**Check.** `tests/vault/import-flow.test.js` "the new rows cannot restyle the collect lists"
+pins `.wv-crow`'s fill and asserts `.wv-cm` declares no `background`; the harness render after
+the rename shows flat rows.

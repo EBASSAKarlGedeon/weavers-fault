@@ -2600,11 +2600,32 @@
 }
 
 .wv-ctitle {
-    flex: 1;
-    font-size: 17px;
+    font-size: 18px;
     font-weight: 700;
-    text-align: center;
     color: var(--wv-on);
+    margin-right: 6px;
+}
+
+/* The "?" that opens Glaze's help tip for a term. No tooltip framework here:
+   the title attribute carries the sentence. */
+.wv-help {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 1px solid rgba(153, 162, 173, 0.45);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    color: rgba(153, 162, 173, 0.9);
+    cursor: help;
+    user-select: none;
+}
+
+.wv-cspacer {
+    flex: 1;
 }
 
 .wv-cback,
@@ -2618,6 +2639,13 @@
     color: var(--wv-on-var);
 }
 
+.wv-cback {
+    width: 28px;
+    height: 28px;
+    margin-left: -6px;
+    font-size: 13px;
+}
+
 .wv-cback:hover,
 .wv-cclose:hover {
     background: rgba(255, 255, 255, 0.07);
@@ -2629,25 +2657,36 @@
     cursor: default;
 }
 
+/* Step bar: back arrow, then the crumbs. Glaze draws it as a breadcrumb
+   (`<- Collecting > Building > Saving`), not as a rail of pills. */
 .wv-cstrip {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 16px 12px;
+    align-items: center;
+    gap: 4px;
+    padding: 0 12px 8px;
 }
 
-.wv-cpill {
-    font-size: 11.5px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.06);
+.wv-crumbs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+}
+
+.wv-crumb {
+    font-size: 13px;
     color: var(--wv-on-var);
 }
 
-.wv-cpill.on {
-    background: rgba(196, 42, 74, 0.18);
+.wv-crumb.on {
     color: var(--wv-accent);
-    font-weight: 600;
+    font-weight: 700;
+}
+
+.wv-crumbsep {
+    font-size: 9px;
+    color: rgba(153, 162, 173, 0.5);
 }
 
 .wv-cbody {
@@ -2809,18 +2848,148 @@
     color: var(--wv-sfw);
 }
 
+/* MenuGroup (Glaze menu_group.dart:254): an 18/700 title with an optional
+   help tip, a muted 12px description, then rows that own their own padding.
+   No glass card here — the sheet already is one. */
 .wv-cgroup {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 0;
 }
 
-.wv-cgrouphead {
-    font-size: 12px;
+.wv-cghead {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 16px 0;
+}
+
+.wv-cgtitle {
+    font-size: 18px;
     font-weight: 700;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
+    color: var(--wv-on);
+}
+
+.wv-cgdesc {
+    padding: 2px 16px 4px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: #99A2AD;
+}
+
+/* One row of a group: label, muted subtitle, optional trailing affordance. */
+.wv-cm {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 16px;
+    text-align: left;
+    color: inherit;
+}
+
+.wv-cm:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.wv-cmicon {
+    flex: none;
+    width: 16px;
+    font-size: 15px;
     color: var(--wv-on-var);
+}
+
+.wv-cmbody {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.wv-cmlabel {
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--wv-on-var);
+}
+
+.wv-cmsub {
+    font-size: 12px;
+    color: #99A2AD;
+}
+
+.wv-cmchev {
+    flex: none;
+    font-size: 12px;
+    color: var(--wv-on-var);
+    transition: transform 150ms ease;
+}
+
+.wv-cmchev.on {
+    transform: rotate(180deg);
+}
+
+.wv-cdiscbody,
+.wv-csrcbody {
+    padding: 0 16px 12px;
+}
+
+/* ContextSourceTile (Glaze janitor_build_widgets.dart:18): the text row and
+   the switch are separate targets, so opening the text never flips the
+   switch and the other way round. */
+.wv-csrcrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-right: 16px;
+}
+
+.wv-csrcrow:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.wv-csrcmain {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0 12px 16px;
+    text-align: left;
+    color: inherit;
+}
+
+.wv-csrcmain:disabled {
+    cursor: default;
+}
+
+.wv-csrcmain:disabled .wv-cmlabel {
+    color: rgba(176, 184, 193, 0.5);
+}
+
+.wv-csrcmain:disabled .wv-cmsub {
+    color: rgba(153, 162, 173, 0.5);
+}
+
+.wv-cswitchrow .wv-switch {
+    pointer-events: none;
+}
+
+/* The clock note under the actions, 14px glyph + 12px line (Glaze
+   janitor_lorebook_capture_sheet.dart, `catalog_lorebooks_build_patience`). */
+.wv-cpatience {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 0 2px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: rgba(153, 162, 173, 0.9);
+}
+
+.wv-cpatience .fa-clock {
+    font-size: 14px;
+    margin-top: 1px;
 }
 
 .wv-cactions {
@@ -2829,27 +2998,23 @@
     gap: 8px;
 }
 
+/* Glaze wraps content-width ActionTiles (janitor_lorebook_capture_sheet
+   `Wrap(spacing: 8)`), it does not stretch two buttons across the sheet. */
 .wv-cactions .wv-abtn {
-    flex: 1;
-    min-width: 170px;
+    flex: 0 0 auto;
 }
 
 .wv-cfield {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding: 0 16px 12px;
     font-size: 12px;
     color: var(--wv-on-var);
 }
 
 .wv-cfield .wv-tokeninput {
     width: 100%;
-}
-
-.wv-cdetails summary {
-    font-size: 12.5px;
-    color: var(--wv-accent);
-    cursor: pointer;
 }
 
 .wv-cpre {

@@ -806,7 +806,7 @@ in the taskbar (and in Alt-Tab) for a moment, with no window visible anywhere.
 
 **Measured cause.** `hideProfileWindows()` can only run after the browser answers on its debugging
 port, and each call boots a fresh `powershell.exe` and compiles its P/Invoke helper. Measured
-2026-11-26 with a native 10 ms sampler on the browser PID: the window carried a taskbar button for
+2026-11-25 with a native 10 ms sampler on the browser PID: the window carried a taskbar button for
 **1054 ms** with a warm PowerShell and **6896 ms** cold, on every launch. The window itself never
 appeared — it is born at `-26214,-26214` and stayed there — so the button was the only thing the user
 could perceive.

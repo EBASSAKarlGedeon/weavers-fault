@@ -27,6 +27,7 @@ import {
     resolveRebuildProfile,
     transportFor,
 } from './lorebook-rebuild.js';
+import { descriptionBodyHtml, escapeHtml, infoBioHtml } from './detail-view.js';
 // Resolved against this module URL so the popup markup works wherever the
 // extension is served from (the overlay DOM lives under the app's base URL).
 const IMG_CHUB = new URL('chub.png', import.meta.url).href;
@@ -203,9 +204,7 @@ const REQUIRE_ROWS = [
     ['requireAlternateGreetings', 'With alternate greetings'],
 ];
 
-function escapeHtml(s) {
-    return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-}
+
 
 function switchRowHtml(key, label) {
     return `
@@ -1378,9 +1377,28 @@ function wireWinChrome(popup, onClose) {
     });
 }
 
+// Glaze's window has no dim, so the empty area around it reads as the backdrop.
+// Clicking it closes, like the title-bar X. Wired once on the persistent popup:
+// a press that starts inside the window (selecting text) must not count, even if
+// the release lands outside, so the press target is remembered, not just the click.
+function wireDetailBackdrop(popup) {
+    if (popup.dataset.backdrop === '1') return;
+    popup.dataset.backdrop = '1';
+    let pressedOnBackdrop = false;
+    popup.addEventListener('pointerdown', (event) => {
+        pressedOnBackdrop = event.button === 0 && event.target === popup;
+    });
+    popup.addEventListener('click', (event) => {
+        const close = pressedOnBackdrop && event.target === popup;
+        pressedOnBackdrop = false;
+        if (close) popup.hidden = true;
+    });
+}
+
 async function openDetail(item, preloaded = null, report = null) {
     ensureOverlay();
     const popup = root.querySelector('.wv-detail');
+    wireDetailBackdrop(popup);
     popup.hidden = false;
     // A closed JanitorAI definition is a verdict, not a failure: there is no
     // card to preview, so it renders the verdict instead of an empty sheet.
@@ -1614,13 +1632,10 @@ function renderDetail(popup, item, character, report = {}) {
     // A janitor card's notes are converted bio HTML (janitor-html.js, sanitised);
     // every other source's notes are plain text and stay escaped.
     const isHtml = d.extensions?.vault_source === 'janitor' && /^<(div|p|h[1-6]|ul|ol|blockquote)\b/i.test(bioText);
-    // What the Description drawer holds: the card's own body when it has one,
-    // otherwise the site's public bio — a closed JanitorAI card has no body, and
-    // the bio is the only prose the site will give us.
-    const bioHtml = String(report?.bioHtml ?? '') || (isHtml ? bioText : '');
-    const descriptionBody = d.description
-        ? escapeHtml(d.description).replace(/\n/g, '<br>')
-        : (bioHtml || (bioText ? escapeHtml(bioText).replace(/\n/g, '<br>') : ''));
+    // Both of these are pure and unit-tested (detail-view.js): the closed-card
+    // bug lived here, and this file cannot be imported without SillyTavern.
+    const infoBio = infoBioHtml({ bioText, isHtml, tagCount: (d.tags ?? []).length, closed });
+    const descriptionBody = descriptionBodyHtml(d.description);
     // One accordion list for every source; the Description row is filled from
     // whichever of the two above exists, so the drawer never renders empty.
     const sections = DETAIL_PROMPT_SECTIONS.filter(([key]) => (key === 'description' ? Boolean(descriptionBody) : Boolean(d[key])));
@@ -1671,24 +1686,17 @@ function renderDetail(popup, item, character, report = {}) {
                                 <div>${escapeHtml(report.reason ?? '')}</div>
                             </div>` : ''}
                         <div class="wv-dtagwrap">${(d.tags ?? []).slice(0, 8).map(detailTagChip).join('')}</div>
-                        ${closed ? '' : (bioText ? `
-                            <div class="wv-dseclabel">Description</div>
-                            ${isHtml
-                                // A janitor card's notes are already converted, sanitised HTML
-                                // (janitor-html.js); escaping it printed the tags and its long
-                                // attribute strings also forced the tab strip out of view.
-                                ? `<div class="wv-bio wv-biohtml">${bioText}</div>`
-                                : `<div class="wv-bio">${escapeHtml(bioText).replace(/\n/g, '<br>')}</div>`}`
-                            : ((d.tags ?? []).length ? '' : '<div class="wv-dnoprev">No preview available</div>'))}
+                        ${infoBio}
                     </div>
                     <div class="wv-dpane wv-dpane-prompts" hidden>
+                        ${sections.length || greetings.length ? '' : '<div class="wv-dnoprev">No prompt blocks to preview</div>'}
                         ${sections.map(([k, label]) => `
                             <div class="wv-acc ${k === 'description' ? 'open' : ''}">
                                 <button class="wv-acchead">
                                     <span class="wv-acclabel">${label}</span>
                                     <span class="fa-solid fa-chevron-up wv-accchev"></span>
                                 </button>
-                                <div class="wv-accbody${k === 'description' && bioHtml && !d.description ? ' wv-biohtml' : ''}">${k === 'description' ? descriptionBody : escapeHtml(d[k]).replace(/\n/g, '<br>')}</div>
+                                <div class="wv-accbody">${k === 'description' ? descriptionBody : escapeHtml(d[k]).replace(/\n/g, '<br>')}</div>
                             </div>`).join('')}
                         ${greetings.length ? `
                             <div class="wv-acc ${greetings.length === 1 ? 'open' : ''}">

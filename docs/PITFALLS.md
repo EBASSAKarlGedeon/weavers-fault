@@ -934,3 +934,30 @@ the select keeps its horizontal padding or its text runs under the native arrow 
 commit that introduced it. Measured after the fix at a 540px and a 348px sheet: fields 46/46/46, insets
 21/21/21/21, button labels off-centre by 0.00px, toggles 2 columns then 1, no horizontal overflow, and a
 430px cap scrolls 616px of body with the footer still inside the sheet.
+## 46. A closed card's public bio was rendered as its definition
+
+**Symptom.** A character whose definition JanitorAI hides opened with an empty Info tab — just the
+lock note and the tags — while its public bio appeared under **Prompt Blocks → Description**, as
+though the site had not hidden anything. The card's own text sat in the one place that is supposed
+to hold a card *body*.
+
+**Measured cause.** `renderDetail` gated the whole bio block on the card being open
+(`closed ? '' : (bioText ? …)`), and the Description drawer fell back to the bio when
+`d.description` was empty. A closed card's payload has every body field null — only the public bio
+survives (`creator_notes`) — so the drawer fallback caught it and the Info tab showed nothing. The
+"Description" label made it worse: the bio was labelled as the definition the site was hiding.
+
+**Rule.** The Info tab renders the creator notes, always, whatever the source — Glaze's
+`_InfoTab` does exactly that (`character_detail_screen.dart:1494-1524`) and labels them
+DESCRIPTION. The Description drawer renders the card's **own body** and nothing else; no fallback
+to notes, ever. On a closed card `description` is empty, so the drawer has no Description row at
+all and the pane says `No prompt blocks to preview` instead of inventing content. The gutter is
+part of the rule: the closed note had `margin: 14px 0 6px`, so its rounded panel ran edge to edge
+(measured left 44) while every other block sat at 60 — it now shares the 16px inset.
+
+**Check.** `detail-view.js` holds the two helpers, so they are unit-testable without SillyTavern
+(`index.js` cannot be imported outside the page): five tests in `tests/vault/vault-client-contracts.test.js`
+pin that a closed card's bio lands on Info, that the drawer is empty without a body, that plain-text
+bios stay escaped, and that the renderer goes through those helpers rather than an inline copy.
+Measured in the shipped stylesheet: note, first tag chip, section label text and bio box all start at
+the same 16px inset (608px wide inside a 640px window), no horizontal overflow.

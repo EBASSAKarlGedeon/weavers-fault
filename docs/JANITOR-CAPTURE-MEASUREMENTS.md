@@ -97,6 +97,38 @@ built by the pure helper `janitorTriggerMessage` (card text, then the caller's w
 greetings). This is the prerequisite for coverage: keys can now be chosen instead of borrowed from
 the card's own vocabulary.
 
+## 2b. First capture of a real closed card (Fate Limitless, 2026-11-24)
+
+Card `4dabfc73-a319-47aa-918a-52be90b828f9` — public, `showdefinition:false`, its five lorebooks all
+published with `is_code_public:false` so the API returns `scripts:[]` and `script:null`. One capture,
+no caller-supplied trigger (the default card-text trigger only):
+
+| Field | Value |
+|---|---|
+| `descriptionChars` | 43,801 |
+| `scenarioChars` | 22,587 |
+| `exampleChars` | 62,192 |
+| `alternateGreetings` | 5 |
+| `closedLoreEntries` | **55 blocks** |
+| `closedLoreChars` | **116,568** |
+| `probeSystemChars` | 191,004 |
+| `triggerSystemChars` | 248,394 |
+
+**M14 — closed lorebooks are capturable on the real target.** The 116,568-char lore region is real
+Fate material (Holy Grail War rules, a full Artoria Pendragon servant sheet with skills and a
+Noble Phantasm) and it arrived without any trigger words beyond what the card itself contains.
+
+**M15 — the block count is an upper bound on the entry count, and a loose one here.** Block sizes ran
+from 102 to 14,028 chars, and many blocks end in `:` , `;` or `,` — mid-sentence. A 14k-char servant
+sheet with markdown lists produces several blocks when split on blank lines, so the 55 blocks are
+*not* 55 entries. This is the same defect as M10, now measured on real data: any rebuild has to
+segment by content, and no count derived from blank lines may be reported as the entry count.
+
+**M16 — a single send already carries ~29k tokens of lore.** 116,568 chars in one system message
+(`triggerSystemChars` 248,394). The author of this card states the first book alone holds "over 129
+entries", so one capture cannot be the whole book: coverage is not optional, and the natural page
+size is whatever the chat window allows per send, with repeated probes for the rest.
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region

@@ -2827,6 +2827,13 @@
     color: var(--wv-on-var);
 }
 
+/* The cards are inset from the pane's text edges so the rounded box does not
+   read as a full-bleed bar (measured: the row and the hint used to share one
+   left edge at the accordion's 16px padding). */
+.wv-dbooklist {
+    padding: 0 8px;
+}
+
 .wv-dbookrow {
     display: flex;
     align-items: center;
@@ -2853,6 +2860,9 @@
 }
 
 .wv-dbookhint {
+    /* Same 16px the section label carries, so the hint starts under the label
+       text instead of flush with the cards. */
+    padding: 0 16px;
     font-size: 11.5px;
     line-height: 1.45;
     color: var(--wv-on-var);

@@ -3617,16 +3617,27 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         + '<div class="wv-cstatus wv-cbuildstatus" aria-live="polite"></div>'
         + '</div>'
         + '<div class="wv-cstage-save" hidden>'
+        // MenuGroup + MenuItem (Glaze janitor_lorebook_capture_sheet.dart
+        // `_buildResult`): the name field, then Save and Export as rows, then
+        // the Tavern JSON the two of them write. No action bar and no third
+        // download — the extracted .txt lives in the Building group.
         + '<div class="wv-cgroup">'
-        + '<div class="wv-cghead"><span class="wv-cgtitle wv-cbuilt-head">Built 0 entries</span></div>'
+        + '<div class="wv-cghead"><span class="wv-cgtitle wv-cbuilt-head">Built 0 entries</span><span class="wv-help" title="What Save and Export write. The model wrote the triggers; the entry text came from your capture.">?</span></div>'
+        + '<div class="wv-cgdesc wv-cscope"></div>'
         + '<label class="wv-cfield"><span>World info name</span><input class="wv-tokeninput wv-cname" type="text" spellcheck="false" /></label>'
-        + '<div class="wv-cnote wv-cscope"></div>'
-        + '<div class="wv-cactions">'
-        + '<button class="wv-abtn wv-abtn-primary wv-csave" type="button"><span class="wv-abtnlabel">Save to library</span></button>'
-        + '<button class="wv-abtn wv-abtn-neutral wv-cexport" type="button"><span class="wv-abtnlabel">Export .json</span></button>'
-        + '<button class="wv-abtn wv-abtn-neutral wv-cdltext2" type="button"><span class="wv-abtnlabel">Download extracted content as .txt</span></button>'
+        + '<button class="wv-cm wv-csave" type="button">'
+        + '<span class="fa-solid fa-bookmark wv-cmicon"></span>'
+        + '<span class="wv-cmbody"><span class="wv-cmlabel">Save to library</span><span class="wv-cmsub">Adds the book to your World Info and attaches it to the card.</span></span>'
+        + '</button>'
+        + '<button class="wv-cm wv-cexport" type="button">'
+        + '<span class="fa-solid fa-download wv-cmicon"></span>'
+        + '<span class="wv-cmbody"><span class="wv-cmlabel">Export .json</span><span class="wv-cmsub">SillyTavern world info, nothing written to the library.</span></span>'
+        + '</button>'
         + '</div>'
+        + '<div class="wv-cjsonwrap">'
         + '<div class="wv-cnote wv-ckeynote"></div>'
+        + '<pre class="wv-cpre wv-cjsontext"></pre>'
+        + '</div>'
         + '<div class="wv-cstatus wv-csavestatus" aria-live="polite"></div>'
         + '</div>'
         + '</div>'
@@ -3979,9 +3990,20 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
             $('.wv-cscope').textContent = state.character
                 ? 'Saved for ' + (state.character.data?.name || 'this character') + ': the book is attached to the card, not switched on globally.'
                 : 'Saved standalone and switched off: no character was imported, so there is nothing to attach it to.';
-            $('.wv-ckeynote').textContent = state.built.entries.length
-                ? 'Keys were inferred by ' + (state.built.model || 'the build model') + '.'
+            const built = state.built.entries;
+            $('.wv-ckeynote').textContent = built.length
+                ? 'Exactly what Save or Export writes. Keys inferred by ' + (state.built.model || 'the build model') + '.'
                 : '';
+            // Glaze shows the Tavern JSON it is about to write (ContentPane,
+            // _buildResult) so nothing lands in the library unseen. Built from
+            // the built name, like Glaze: the field above may still be unsaved.
+            try {
+                $('.wv-cjsontext').textContent = built.length
+                    ? JSON.stringify(worldInfoFor(state.built.name, built), null, 2)
+                    : '';
+            } catch (error) {
+                $('.wv-cjsontext').textContent = '';
+            }
         }
     };
 
@@ -4276,7 +4298,6 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
     $('.wv-csave').addEventListener('click', save);
     $('.wv-cexport').addEventListener('click', exportJson);
     $('.wv-cdltext').addEventListener('click', () => downloadTextFile('extracted-lorebook.txt', state.captured, 'text/plain'));
-    $('.wv-cdltext2').addEventListener('click', () => downloadTextFile('extracted-lorebook.txt', state.captured, 'text/plain'));
     $('.wv-cdownloadall').addEventListener('click', downloadAll);
     $('.wv-cpubrows').addEventListener('click', async event => {
         const button = event.target?.closest('[data-act]');

@@ -2975,6 +2975,20 @@
     pointer-events: none;
 }
 
+/* The built book's JSON: Glaze puts it in a ContentPane under the MenuGroup
+   (`_buildResult`), padded like the group it belongs to. */
+.wv-cjsonwrap {
+    padding: 0 16px 12px;
+}
+
+.wv-cjsontext {
+    margin: 6px 0 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--wv-on-var);
+}
+
 /* The clock note under the actions, 14px glyph + 12px line (Glaze
    janitor_lorebook_capture_sheet.dart, `catalog_lorebooks_build_patience`). */
 .wv-cpatience {
@@ -3017,12 +3031,15 @@
     width: 100%;
 }
 
+/* ContentPane (Glaze janitor_build_widgets.dart): mono, 11px/1.4, r12, a
+   surface wash with an outline, capped at 220 px so the sheet keeps scrolling
+   as one surface instead of nesting a second viewport. */
 .wv-cpre {
     max-height: 220px;
     overflow: auto;
     margin: 6px 0 0;
     padding: 10px;
-    border-radius: 10px;
+    border-radius: 12px;
     background: #1E1E1E;
     border: 1px solid var(--wv-ov);
     font-size: 11px;

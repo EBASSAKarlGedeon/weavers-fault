@@ -884,3 +884,28 @@ before the flag, the headless document request said `HeadlessChrome/158.0.0.0` w
 `Chrome/158.0.0.0`; after it, both say `Chrome/158.0.0.0`.
 
 
+
+## 44. An open accordion body with a pixel cap hides the rest of the description
+
+**Symptom.** In the character detail sheet, an open Description (or any Prompt Blocks section) stops
+mid-sentence at a fixed point: no scrollbar inside the box, no ellipsis, and the sheet's own scrollbar
+reaches its end at that line. Everything after it is unreachable. Short descriptions look perfect,
+which is why it survived the layout pass.
+
+**Measured cause.** `style.css` opened the accordion with `max-height: 2000px` and `overflow: hidden`
+(the closed 96px state animated up to that figure). `overflow: hidden` on a box that is not a scroll
+container clips the remainder outright, and 2000px was a stand-in for "tall enough", not a measurement.
+Measured 2026-11-26 in a stylesheet harness (the shipped CSS, a 90-line body at 640px wide): the body
+held 5665px of content, painted 1956px, and the sheet's scroll area ended at **2511px** — about 3.5k
+pixels of text behind an invisible wall. The scroll container (`.wv-dscroll`) was never the problem.
+
+**Rule.** A box that must show everything gets `max-height: none`, never a pixel guess. Keep the
+expansion animation by measuring instead of guessing: on open set the inline `max-height` to
+`scrollHeight`, then release it to `none` on `transitionend` (and pin `scrollHeight` before closing, or
+the animation snaps from `none`). One scroll container per sheet — the sheet — never a nested scroll
+box inside it.
+
+**Check.** `tests/vault/vault-client-contracts.test.js` pins the contract: the open rule matches
+`max-height: none` and carries no pixel value, the closed rule keeps its clamp, and the toggle reads
+`scrollHeight` and releases to `none`. Measured after the fix in the same harness: scroll area
+**6160px**, body painted 5495px of its 5665px content — the last line sits inside the scrollable sheet.

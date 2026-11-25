@@ -1785,7 +1785,11 @@
 }
 
 .wv-acc.open .wv-accbody {
-    max-height: 2000px;
+    /* `none`, never a pixel cap: the open body is the whole description, and a
+       fixed max-height (2000px until PITFALLS #44) clipped anything longer with
+       no scrollbar — the sheet scrolls, the body must not be a second box. The
+       280ms expansion is measured in JS (index.js, the .wv-acchead handler). */
+    max-height: none;
     -webkit-line-clamp: unset;
     -webkit-mask-image: none;
     mask-image: none;

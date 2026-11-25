@@ -1734,8 +1734,31 @@ function renderDetail(popup, item, character, report = {}) {
     selectTab(0);
 
     // Accordions: closed = 3-line clamp + fade mask; open = full (280ms).
+    // The open body has no height cap (style.css), so the expansion animation is
+    // driven here: measure the real content height, hand it to the transition,
+    // then release the inline style to `none` once it lands. Live height in the
+    // DOM matters — greeting rows and images change it after opening — and a
+    // pixel cap is what made long descriptions unscrollable (PITFALLS #44).
     popup.querySelectorAll('.wv-acc').forEach(acc => {
-        acc.querySelector('.wv-acchead').addEventListener('click', () => acc.classList.toggle('open'));
+        const body = acc.querySelector('.wv-accbody');
+        acc.querySelector('.wv-acchead').addEventListener('click', () => {
+            if (!body) { acc.classList.toggle('open'); return; }
+            const opening = !acc.classList.contains('open');
+            if (opening) {
+                acc.classList.add('open');
+                body.style.maxHeight = `${body.scrollHeight}px`;
+                return;
+            }
+            // Closing: pin the current height first, or the transition would
+            // start from `none` and snap.
+            body.style.maxHeight = `${body.scrollHeight}px`;
+            void body.offsetHeight;
+            body.style.maxHeight = '';
+            acc.classList.remove('open');
+        });
+        body?.addEventListener('transitionend', e => {
+            if (e.propertyName === 'max-height' && acc.classList.contains('open')) body.style.maxHeight = 'none';
+        });
     });
     popup.querySelectorAll('.wv-greetrow').forEach(row => {
         row.addEventListener('click', () => {

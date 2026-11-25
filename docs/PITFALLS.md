@@ -702,3 +702,51 @@ reachable without scrolling.
 **Check.** With any card open, `.wv-dtabs` must report `scrollWidth === clientWidth`, and all three
 labels must be inside its box; clicking the third must move the pill to the third segment (measured:
 tabs at 338–536 / 536–734 / 734–932, indicator 730–926).
+
+## 37. Adoption skipped the step that hides the window
+
+**Symptom.** "The Chrome window appears and disappears after like 30 seconds." Sometimes with a taskbar
+button, sometimes without, always for a moment, and never reproducible by just browsing.
+
+**Measured cause.** Two holes in the same place, both in the *reuse* path:
+
+- `adoptExisting()` — which every request after the first takes, because the session stays alive between
+  requests — attached the page and returned. It applied neither `hideWindow()` nor `park()`. Whatever a
+  previous human step (sign-in, persona wall, "Show the browser window") left on the desktop therefore
+  stayed on the desktop for the rest of the session, instead of being put back the moment the next
+  request arrived.
+- `park()` began with `if (!this.page || !this.windowId) return;`, and `windowId` is only set by
+  `placeWindowOnScreen()` — i.e. by a *reveal*. A window that was never revealed had no id, so `park()`
+  silently did nothing, and `start()`'s `--window-position=-32000,-32000` is not a guarantee either:
+  Chrome restores the placement it saved for the profile (measured: a reveal writes `40,40` into
+  `Preferences.window.browser.window_placement`, and the next session is born there).
+
+So a single reveal could leave the window on screen for the whole session, and the 30 s idle teardown
+was the thing that finally removed it. The taskbar fix (#35) was real but answered a different
+question: the window could be *on screen* and out of the taskbar at the same time.
+
+**Rule.** Every path that attaches to an existing page must re-assert the window's state, not only the
+fresh-start path. `park()` must fetch the window id itself when it does not have one. `reveal()` must
+take its own hold (3 min, non-sticky) so the idle teardown cannot close a window a human is looking at
+— a revealed window without a hold lived exactly as long as the idle TTL.
+
+**Check.** Measure the window rectangle, not the flags: `(-26214,-26214)` when parked, `(40,40)` after a
+reveal. After the fix: fresh start parked, reveal `(40,40)` with `tool=True app=False` (no taskbar, no
+Alt-Tab entry), `park()` brings it back offscreen even when it was never revealed.
+
+## 38. The card's badge is the message count, not the chat count
+
+**Symptom.** A card showed `26.7k` in the vault grid and `991k` on janitorai.com — the number the site
+prints under the chat bubble.
+
+**Measured cause.** The listing row carries both `stats.chat` and `stats.message`; the grid was mapped
+to `stats.chat`. Measured on "The Bracelet Stays On": `chat = 26,787`, `message = 994,892`, site badge
+`991k` — so the site's "chats" badge is the *message* total. One request through the route after the
+fix returned `chatCount: 996,977` for the same card, matching the site as it grows.
+
+**Rule.** A badge must show the number the source puts in the same place; field names are not evidence
+(`pp-cc-chats-count` is fed by `stats.message`). `normalizeJanitorHit()` now maps `chatCount` to
+`messages` and keeps `chats` available for anything that needs the real chat count.
+
+**Check.** `normalizeJanitorHit({ stats: { chat: 26787, message: 994892 } }).chatCount === 994892`, and
+the card's badge must read the same `NNNk` the site shows for it.

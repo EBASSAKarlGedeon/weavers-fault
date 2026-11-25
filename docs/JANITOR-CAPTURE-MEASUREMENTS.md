@@ -151,6 +151,33 @@ with the vocabulary in the message. Coverage is therefore a paging loop over the
 the page size set by the chat window (~20-40 keywords per probe at ~3.4k chars of lore per keyword),
 and it terminates when a probe adds nothing new.
 
+## 2d. The full coverage pass on Fate (16 probes)
+
+Keywords were taken from the author's own list (996 of them), batched 20-25 per probe, each probe a
+fresh chat on the same card. New blocks per probe: 55, 86, 63, 66, 47, 75, 54, 55, 53, 52, 74, 60,
+38, then **0, 0, 0** for the last three batches (53 servant names the union still did not contain).
+
+| Measure | Value |
+|---|---|
+| probes | 16 |
+| unique blocks in the union | **778** |
+| unique chars | **1,020,901** |
+| block size | min 3, median 720, p90 3,078, max 14,028 |
+| blocks containing `Servant Name:` | **298** (297 distinct names, one repeat) |
+| sprite image URLs (`ella.janitorai.com/media-approved/…`) | 194 |
+
+**M19 — the attached set is ~300 entries and ~1M chars, and one pass gets it.** The 298 sheets
+correspond closely to the 333 rows in the author's list (280 matched by name), and the last three
+batches over every remaining listed name added nothing. So the union is the card's attached content,
+not a sample: ~250k tokens of lorebook text behind a card whose definition field is 43,801 chars and
+whose example dialogs are 62,192.
+
+**M20 — entries are ~3.4k chars and carry images.** A servant entry is a wrapper plus a sheet
+(`Servant Name:`, class, height/weight, alignment, appearance, skills, Noble Phantasm) plus sprite
+blocks with markdown image links. That is why blank-line splitting shreds them into 2-3 blocks: the
+sheet's own formatting *is* blank lines. Any rebuild has to segment on content (a `Servant Name:`
+block starts an entry) and re-host 194 sprite URLs that currently point at the site's CDN.
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region

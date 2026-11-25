@@ -773,3 +773,53 @@ needs no site traffic and exercises spawn → attach → wait → fetch → reve
 **Check.** A session must start against a local origin, and
 `tests/vault/vault-client-contracts.test.js` pins that `BROWSER_CANDIDATES` is declared and read by
 `findBrowserBinary()` so the list cannot be left behind again.
+
+## 40. The window a human had to sign in through had no taskbar button
+
+**Symptom.** During a sign-in the Chrome window was on screen, but it was missing from the
+taskbar and from Alt-Tab, so leaving it and coming back meant hunting for it — reported as "I
+cannot get back to that window".
+
+**Measured cause.** `reveal()` ended by calling `hideWindow()` (and a second time from a 1.5 s
+timer), which applies `WS_EX_TOOLWINDOW`. That is precisely the style that removes a window from
+the taskbar and from Alt-Tab, added in #35 on purpose — for the *parked* automation window. Applied
+to the one window a human must find and type into, it made that window reachable only by minimising
+everything else. The reasoning behind it ("a taskbar button would leave a stray Chrome icon while
+using the vault") only holds for a window nobody needs.
+
+**Rule.** Hiding is scoped to the modes where nobody needs the window. The tool style belongs on the
+parked window and must be *off* while a human step is in progress: `reveal()` calls
+`normalizeProfileWindows()`, sets `taskbarHidden = false` and does not re-hide, then `release()` →
+`park()` puts the style back. A window with neither a taskbar button nor an Alt-Tab entry is not
+"less intrusive", it is unreachable — and it is the same window a Cloudflare challenge may need a
+human to click in.
+
+**Check.** Sample the extended style across one reveal/release cycle (native sampler, 10 ms):
+revealed window `0x240100` (APPWINDOW, tool off) at `(40,40)`; after `park()` `0x200180`
+(TOOLWINDOW, app off) at `(-26214,-26214)`. The `window hygiene` tests in `tests/vault/vault-browser-backend.test.js` pin that
+`reveal()` never calls `hideWindow()` again, and that `start()` parks before it waits.
+
+## 41. The taskbar button exists before any of our code can reach it
+
+**Symptom.** "Chrome flashes open and shut" at the start of a vault request: a Chrome button appears
+in the taskbar (and in Alt-Tab) for a moment, with no window visible anywhere.
+
+**Measured cause.** `hideProfileWindows()` can only run after the browser answers on its debugging
+port, and each call boots a fresh `powershell.exe` and compiles its P/Invoke helper. Measured
+2026-11-26 with a native 10 ms sampler on the browser PID: the window carried a taskbar button for
+**1054 ms** with a warm PowerShell and **6896 ms** cold, on every launch. The window itself never
+appeared — it is born at `-26214,-26214` and stayed there — so the button was the only thing the user
+could perceive.
+
+**Rule.** Apply the style from a watcher that is already running before the browser spawns:
+`startTaskbarWatch()` is called at the top of `start()` (its `Add-Type` compiles while Chrome boots),
+polls the profile's windows every 50 ms and restyles any window the moment it exists. The later
+`hideWindow()` calls stay as the fallback for a machine where PowerShell cannot start. The watcher
+also repairs what Chrome itself undoes: every `Browser.setWindowBounds` rebuilds the window and drops
+the custom style, which is why `park()` must come *before* the challenge wait and why the watcher
+must outlive it. It is stopped in `reveal()` (a running watcher would strip the human's button again)
+and in `dispose()`.
+
+**Check.** With the sampler on the browser PID: the first observation after birth is already
+`0x200180` (0 ms of button at 10 ms resolution), and the two times Chrome rebuilds the window during
+start the style comes back 17 ms and 85 ms later. Before the watcher: 1054–6896 ms.

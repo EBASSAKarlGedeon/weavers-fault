@@ -83,6 +83,20 @@ first (`R00`) and the last (`R59`) were both complete, closing sentinel present,
 trimmed at either end. The binding constraint is therefore the chat's own context window, not a
 lorebook budget — a book of realistic 500-700-char entries can be probed in batches of ~50-100.
 
+**M12 — a card's books concatenate into one region, grouped by book.** With two published books
+attached to the same card (3 entries each, identical priorities), the region was `R01, R02, R03, S01,
+S02, S03` — every entry of the first book, then every entry of the second, each group in priority
+order. Six entries, 730 chars, no separator between the groups beyond the usual `\n\n`. So the
+splice is not a global priority merge across books, and "which book did this entry come from" cannot
+be read off the text; it only matters for mapping a rebuild back onto separate books.
+
+**M13 — a caller-supplied trigger makes arbitrary keys fire.** `triggerText: 'wobble'` sent through
+`POST /janitor/capture` activated the `S` entries, whose key appears nowhere in the card. The route
+now forwards `triggerText` (capped at 20,000 chars) into `captureJanitorCard`, and the message is
+built by the pure helper `janitorTriggerMessage` (card text, then the caller's words, then the
+greetings). This is the prerequisite for coverage: keys can now be chosen instead of borrowed from
+the card's own vocabulary.
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region
@@ -125,10 +139,9 @@ entry is replaced as well. This single fact explains every "cap" observation abo
 - Where is the real ceiling? 60,178 chars is the largest measured splice. The next step would be a
   fixture that provably exceeds the chat window (e.g. 300k chars) to see whether the site trims the
   region, drops entries, or refuses the send.
-- Does the region stay one block when a card has several attached books? Fate has five, and they
-  all splice into the same prompt. Attribution turned out not to matter for rebuilding content (we
-  want the entries, not the book they came from), but ordering and interleaving still need one
-  measurement with two attached books.
+- Does the *book* order follow attachment order, creation date or something else? Two books came
+  out grouped in a stable order (R then S); with Fate's five it decides whether a rebuild can be
+  split back into the same five books.
 - Does a *published* script behave differently from a draft? The first two captures were with an
   unpublished book and produced zero lore; both had an unattached book, so attachment — not
   publication state — was the cause. Publication is confirmed working; draft behaviour is untested.

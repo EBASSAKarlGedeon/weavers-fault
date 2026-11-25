@@ -3542,7 +3542,7 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         + '</div>'
         + '<div class="wv-cstage-collect" hidden>'
         + '<div class="wv-csection wv-cpublic" hidden>'
-        + '<button class="wv-csechead" type="button" data-sec="public" title="Public lorebooks · <span class="wv-csecn"></span>"><span>Public lorebooks · <span class="wv-csecn"></span></span><span class="fa-solid fa-chevron-up wv-cchev"></span></button>'
+        + '<button class="wv-csechead" type="button" data-sec="public"><span>Public lorebooks · <span class="wv-csecn"></span></span><span class="fa-solid fa-chevron-up wv-cchev"></span></button>'
         + '<div class="wv-csecbody" data-sec="public" hidden>'
         + '<div class="wv-cnote wv-cpubnote"></div>'
         + '<div class="wv-crows wv-cpubrows"></div>'
@@ -3554,6 +3554,13 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         + '<div class="wv-csecbody" data-sec="closed" hidden>'
         + '<div class="wv-cnote wv-ccclosednote"></div>'
         + '<div class="wv-crows wv-ccclosedrows"></div>'
+        + '</div>'
+        + '</div>'
+        + '<div class="wv-csection wv-cfailed" hidden>'
+        + '<button class="wv-csechead" type="button" data-sec="failed"><span>Not checked · <span class="wv-cseccn2"></span></span><span class="fa-solid fa-chevron-up wv-cchev"></span></button>'
+        + '<div class="wv-csecbody" data-sec="failed" hidden>'
+        + '<div class="wv-cnote">Janitor.AI did not answer for these. Nothing is assumed about them: they are neither public nor confirmed closed.</div>'
+        + '<div class="wv-crows wv-cfailedrows"></div>'
         + '</div>'
         + '</div>'
         + '<div class="wv-cnone" hidden>No lorebooks attached.</div>'
@@ -3647,6 +3654,7 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
     const closedBooks = () => state.books.filter(book => book.kind === 'closed');
     const jsonBooks = () => state.books.filter(book => book.kind === 'public' && book.book);
     const jsBooks = () => state.books.filter(book => book.kind === 'scripted' && book.jsSource);
+    const failedBooks = () => state.books.filter(book => book.kind === 'failed');
     const downloadable = () => [...jsonBooks(), ...jsBooks()];
 
     const setStatus = (selector, text) => { const el = $(selector); if (el) el.textContent = text; };
@@ -3738,6 +3746,7 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
     };
 
     const describeKinds = (book) => {
+        if (book.kind === 'failed') return 'Not checked · ' + (book.reason || 'unknown') + ' — retry from the card';
         if (book.kind === 'scripted') return 'Scripted (advanced) · rebuilt with your LLM';
         if (book.kind === 'closed') return book.reason === 'private' ? 'Private · recovered from the prompt' : 'Closed · recovered from the prompt';
         const count = Number(book.entryCount) || 0;
@@ -3748,7 +3757,9 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         const key = keyOf(book);
         const done = state.downloaded.has(key);
         const publicBook = book.kind === 'public' || book.kind === 'scripted';
-        const icon = book.kind === 'closed' ? 'fa-lock' : book.kind === 'scripted' ? 'fa-code' : 'fa-book';
+        const icon = book.kind === 'failed' ? 'fa-triangle-exclamation'
+            : book.kind === 'closed' ? 'fa-lock'
+                : book.kind === 'scripted' ? 'fa-code' : 'fa-book';
         const action = book.kind === 'scripted' ? 'convert' : 'save';
         const label = state.converting === key ? 'Converting…' : 'Convert';
         return '<div class="wv-crow" data-key="' + esc(key) + '">'
@@ -3811,9 +3822,11 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
         // ── collect ───────────────────────────────────────────────────────────
         const pub = [...jsonBooks(), ...jsBooks()];
         const closed = closedBooks();
+        const failed = failedBooks();
         $('.wv-cpublic').hidden = !pub.length;
         $('.wv-cclosed').hidden = !closed.length;
-        $('.wv-cnone').hidden = pub.length + closed.length > 0 || !state.loaded;
+        $('.wv-cfailed').hidden = !failed.length;
+        $('.wv-cnone').hidden = pub.length + closed.length + failed.length > 0 || !state.loaded;
         if (state.loadError) $('.wv-cnone').textContent = state.loadError;
         overlay.querySelectorAll('.wv-cpublic .wv-csecn').forEach(node => { node.textContent = String(pub.length); });
         overlay.querySelectorAll('.wv-cclosed .wv-cseccn').forEach(node => { node.textContent = String(closed.length); });
@@ -3831,6 +3844,10 @@ function openCaptureSheet({ item, meta = null, character = null, characterImport
             all.querySelector('.wv-abtnlabel').textContent = state.savingAll
                 ? 'Saving ' + state.savedAllDone + '/' + pub.length + '…'
                 : 'Download all (' + pub.length + ')';
+        }
+        if (failed.length) {
+            $('.wv-cfailed .wv-cseccn2').textContent = String(failed.length);
+            $('.wv-cfailedrows').innerHTML = failed.map(rowHtml).join('');
         }
         if (closed.length) {
             $('.wv-ccclosednote').textContent = closed.length > 1

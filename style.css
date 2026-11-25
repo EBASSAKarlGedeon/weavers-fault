@@ -2316,3 +2316,132 @@
     letter-spacing: -0.2px;
     color: var(--wv-on-var);
 }
+
+/* Rebuild sheet (scripted lorebooks). A dialog, so the sheet itself scrolls:
+   the body is the only scrolling box, and the footer stays reachable while a
+   long JavaScript source is previewed. Never a fixed-height clipped sub-box —
+   the detail-sheet lesson in PITFALLS #44. */
+.wv-rbsheet {
+    display: flex;
+    flex-direction: column;
+    width: min(94vw, 540px);
+    max-height: 86vh;
+    padding-top: 0;
+}
+
+.wv-rbsheet .wv-modehead {
+    padding: 0 20px 10px;
+}
+
+.wv-rbscroll {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 20px 4px;
+}
+
+.wv-rbhint {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--wv-on-var);
+}
+
+.wv-rbsection {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--wv-on-var);
+    margin-top: 6px;
+}
+
+.wv-rbbooks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.wv-rbbook {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 13px;
+    color: var(--wv-on);
+    cursor: pointer;
+}
+
+.wv-rbbook input,
+.wv-rbtoggle input {
+    accent-color: var(--wv-accent);
+    margin: 0;
+}
+
+.wv-rbtoggles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 14px;
+}
+
+.wv-rbtoggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--wv-on-var);
+    cursor: pointer;
+}
+
+.wv-rbtoggle.wv-rboff {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.wv-rbsummary {
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--wv-on-var);
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.wv-rbdetails summary {
+    font-size: 12.5px;
+    color: var(--wv-accent);
+    cursor: pointer;
+}
+
+.wv-rbpre {
+    max-height: 220px;
+    overflow: auto;
+    margin: 6px 0 0;
+    padding: 10px;
+    border-radius: 10px;
+    background: #1E1E1E;
+    border: 1px solid var(--wv-ov);
+    font-size: 11px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.wv-rbstatus {
+    min-height: 18px;
+    font-size: 12.5px;
+    color: var(--wv-on-var);
+}
+
+.wv-rbfoot {
+    display: flex;
+    gap: 8px;
+    padding: 12px 20px 0;
+}
+
+.wv-rbfoot .wv-abtn {
+    flex: 1;
+}

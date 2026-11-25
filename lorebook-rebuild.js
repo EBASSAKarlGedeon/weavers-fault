@@ -464,3 +464,140 @@ export function parseReply(reply, where = {}) {
 export function partCacheKey(request, messages) {
     return [request.profileId ?? '', request.model ?? '', ...messages.map(m => m.content)].join('\u0000');
 }
+
+/**
+ * Defaults for the build sheet, mirroring Glaze's `_buildSources`
+ * (janitor_lorebook_capture_sheet.dart:233): card, catalog and scenario on,
+ * greetings off, lorebook descriptions ON for a build (they differ from the
+ * capture defaults). `catalog` is off here: our server does not carry the site
+ * description, so turning it on needs one extra page fetch — an ask, not a
+ * default. `extra` is the user's own free text.
+ */
+export const REBUILD_CONTEXT_DEFAULTS = Object.freeze({
+    card: true,
+    catalog: false,
+    scenario: true,
+    greetings: false,
+    lorebookDescs: true,
+});
+
+/** The persisted shape, and the shape `readRebuildSettings()` guarantees. */
+export const REBUILD_DEFAULTS = Object.freeze({
+    profileId: '',
+    model: '',
+    chunkTokens: DEFAULT_CHUNK_TOKENS,
+    context: REBUILD_CONTEXT_DEFAULTS,
+    extra: '',
+    systemText: '',
+    systemJs: '',
+});
+
+/**
+ * Normalize whatever is in `extension_settings` into a complete, typed
+ * settings object, so a half-written or hand-edited entry can never reach a
+ * request as `undefined`.
+ * @param {unknown} raw
+ * @returns {{ profileId: string, model: string, chunkTokens: number,
+ *   context: { card: boolean, catalog: boolean, scenario: boolean,
+ *     greetings: boolean, lorebookDescs: boolean }, extra: string,
+ *   systemText: string, systemJs: string }}
+ */
+export function readRebuildSettings(raw) {
+    const value = raw && typeof raw === 'object' ? raw : {};
+    const context = value.context && typeof value.context === 'object' ? value.context : {};
+    const flag = (key) => (typeof context[key] === 'boolean' ? context[key] : REBUILD_CONTEXT_DEFAULTS[key]);
+    const chunk = Number(value.chunkTokens);
+    return {
+        profileId: typeof value.profileId === 'string' ? value.profileId : '',
+        model: typeof value.model === 'string' ? value.model.trim() : '',
+        chunkTokens: Number.isFinite(chunk) && chunk >= 0 ? Math.trunc(chunk) : DEFAULT_CHUNK_TOKENS,
+        context: {
+            card: flag('card'),
+            catalog: flag('catalog'),
+            scenario: flag('scenario'),
+            greetings: flag('greetings'),
+            lorebookDescs: flag('lorebookDescs'),
+        },
+        extra: typeof value.extra === 'string' ? value.extra : '',
+        systemText: typeof value.systemText === 'string' ? value.systemText : '',
+        systemJs: typeof value.systemJs === 'string' ? value.systemJs : '',
+    };
+}
+
+/**
+ * Which connection profile builds: a valid saved id, else the active profile,
+ * else nothing — never a silent pick of some other profile (Glaze
+ * `resolveLorebookBuildConfig`, :309-321). `profiles` must already be the
+ * usable chat-completion subset; this only chooses among them.
+ * @param {{ id: string, name?: string, model?: string }[]} profiles
+ * @param {string} preferredId
+ * @param {string} activeId
+ * @returns {{ profile: object, fellBack: boolean, staleId: string }}
+ */
+export function resolveRebuildProfile(profiles, preferredId, activeId) {
+    const list = Array.isArray(profiles) ? profiles : [];
+    const preferred = preferredId ? list.find(p => p && p.id === preferredId) : null;
+    if (preferred) return { profile: preferred, fellBack: false, staleId: '' };
+    const active = activeId ? list.find(p => p && p.id === activeId) : null;
+    if (active) {
+        return { profile: active, fellBack: Boolean(preferredId), staleId: preferredId || '' };
+    }
+    throw new RebuildError('No chat-completion connection profile is available.',
+        { code: 'no-profile' });
+}
+
+/**
+ * Titles and descriptions of the character's lorebooks, as the CONTEXT block
+ * expects them: a title line, a blank line, the description, blank line, next.
+ * @param {{ title?: string, name?: string, description?: string }[]} books
+ * @returns {string}
+ */
+export function lorebookDescsContext(books) {
+    return (Array.isArray(books) ? books : [])
+        .map(book => {
+            const title = String(book.title || book.name || '').trim();
+            const description = String(book.description || '').trim();
+            if (!title && !description) return '';
+            return [title, description].filter(Boolean).join('\n\n');
+        })
+        .filter(Boolean)
+        .join('\n\n\n');
+}
+
+/**
+ * The character card's greetings, first one first, joined the way Glaze joins
+ * them (`:335`).
+ * @param {{ first_mes?: string, alternate_greetings?: string[] }} data
+ * @returns {string}
+ */
+export function greetingsContext(data) {
+    const card = data && typeof data === 'object' ? data : {};
+    const greetings = [card.first_mes, ...(Array.isArray(card.alternate_greetings) ? card.alternate_greetings : [])]
+        .map(value => String(value ?? '').trim())
+        .filter(Boolean);
+    return greetings.join('\n\n---\n\n');
+}
+
+/**
+ * Build the context object `planBuild()` consumes from a card, its books and
+ * the chosen toggles. One function, so the preview and the request cannot show
+ * different context.
+ * @param {{ card?: object, books?: object[], catalog?: string, extra?: string,
+ *   toggles?: Partial<typeof REBUILD_CONTEXT_DEFAULTS> }} options
+ * @returns {Record<string, string>}
+ */
+export function contextFor(options = {}) {
+    const { card = null, books = [], catalog = '', extra = '', toggles = {} } = options;
+    const enabled = { ...REBUILD_CONTEXT_DEFAULTS, ...toggles };
+    const data = card && card.data ? card.data : (card || {});
+    return {
+        card: enabled.card ? String(data.description ?? '').trim() : '',
+        catalog: enabled.catalog ? String(catalog ?? '').trim() : '',
+        scenario: enabled.scenario ? String(data.scenario ?? '').trim() : '',
+        greetings: enabled.greetings ? greetingsContext(data) : '',
+        lorebookDescs: enabled.lorebookDescs ? lorebookDescsContext(books) : '',
+        // The extra box has no toggle: it is either written or empty, and an
+        // empty one is simply absent from the message.
+        extra: String(extra ?? '').trim(),
+    };
+}

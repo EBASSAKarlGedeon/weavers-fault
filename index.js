@@ -13,7 +13,20 @@
 //     212px grid slots, chub hides the result-count line.
 import { extension_settings } from '../../extensions.js';
 import { getRequestHeaders, characters, getCharacters, importCharacter } from '../../../script.js';
-import { convertCharacterBook, saveWorldInfo, updateWorldInfoList, importWorldInfo } from '../../world-info.js';
+import { convertCharacterBook, createWorldInfoEntry, saveWorldInfo, updateWorldInfoList, world_names, importWorldInfo } from '../../world-info.js';
+import { ConnectionManagerRequestService } from '../shared.js';
+import { getTokenCount } from '../../tokenizers.js';
+import {
+    REQUEST_TEMPERATURE,
+    RebuildError,
+    contextFor,
+    parseReply,
+    partCacheKey,
+    planBuild,
+    readRebuildSettings,
+    resolveRebuildProfile,
+    transportFor,
+} from './lorebook-rebuild.js';
 // Resolved against this module URL so the popup markup works wherever the
 // extension is served from (the overlay DOM lives under the app's base URL).
 const IMG_CHUB = new URL('chub.png', import.meta.url).href;
@@ -3084,6 +3097,10 @@ async function importJanitorLorebooks(item, avatar) {
 
     const books = Array.isArray(payload.books) ? payload.books : [];
     const saved = [];
+    // Scripted books cannot be saved from their payload: their lore only exists
+    // as JavaScript. Collected here so the rebuild sheet can offer them once,
+    // after the import, instead of one toast per book that goes nowhere.
+    const scripted = [];
     for (const book of books) {
         if (book.kind === 'public' && book.book) {
             try {
@@ -3102,7 +3119,8 @@ async function importJanitorLorebooks(item, avatar) {
         const reason = book.reason || book.kind;
         ledgerAdd(item, 'lorebook', reason);
         if (book.kind === 'scripted') {
-            toastr.info(`'${book.name}' is a scripted lorebook — it needs an LLM rebuild, which is not run automatically.`, "Weaver's Vault lorebooks");
+            if (book.jsSource) scripted.push(book);
+            else toastr.warning(`'${book.name}' is scripted but its source could not be read, so it cannot be rebuilt.`, "Weaver's Vault lorebooks");
         } else if (book.kind === 'closed') {
             toastr.warning(reason === 'private'
                 ? `'${book.title}' is private — the author has not published it, so it cannot be downloaded.`
@@ -3118,9 +3136,328 @@ async function importJanitorLorebooks(item, avatar) {
         if (stamped) await getCharacters();
         else console.warn(`[${extensionName}] lorebooks saved but the card was not stamped with vault_lorebooks`);
     }
+    if (scripted.length) {
+        openRebuildSheet({
+            item,
+            avatar,
+            card: characters.find(character => character.avatar === avatar) || null,
+            books,
+            scripted,
+            saved,
+        });
+    }
     return saved;
 }
 
+// ─── Scripted-lorebook rebuild (docs/LOREBOOK-REBUILD-SPEC.md) ──────────────
+// A scripted book is JavaScript, not entries: the site's "advanced" books build
+// their lore in code, so the only way to a World Info is to ask a model to
+// recover it. The request comes from lorebook-rebuild.js — the same planBuild()
+// the preview renders — and NOTHING is sent until the user confirms the profile
+// and model in the sheet. Silence here is the feature: an automatic rebuild
+// would spend tokens on a profile the user never chose.
+
+function rebuildConfig() {
+    const store = settings();
+    store.rebuild = readRebuildSettings(store.rebuild);
+    return store.rebuild;
+}
+
+function saveRebuildConfig(patch) {
+    Object.assign(rebuildConfig(), patch);
+    saveSettingsQuiet();
+}
+
+// Sync on purpose: planBuild() must price a request before it is sent, and the
+// async counter belongs to rendering, not to the plan.
+function rebuildCountTokens() {
+    return (text) => {
+        try { return getTokenCount(String(text ?? ''), 0); }
+        catch { return Math.ceil(String(text ?? '').length / 4); }
+    };
+}
+
+/** Chat-completion profiles only: a text-completion or embedding profile cannot
+ * answer a chat request, and offering it would be a trap. */
+function rebuildProfiles() {
+    try {
+        return ConnectionManagerRequestService.getSupportedProfiles().filter(profile => {
+            try {
+                return ConnectionManagerRequestService.validateProfile(profile).selected === 'openai';
+            } catch {
+                return false;
+            }
+        });
+    } catch {
+        return [];
+    }
+}
+
+/** Never overwrite a World Info file the user already has. */
+function uniqueWorldName(base) {
+    const name = String(base || 'Rebuilt lorebook').trim();
+    if (!world_names.includes(name)) return name;
+    const rebuilt = `${name} (rebuilt)`;
+    if (!world_names.includes(rebuilt)) return rebuilt;
+    for (let i = 2; i < 100; i += 1) {
+        const candidate = `${name} (rebuilt ${i})`;
+        if (!world_names.includes(candidate)) return candidate;
+    }
+    return `${name} (rebuilt ${Date.now()})`;
+}
+
+function rebuildBookLabel(book) {
+    const title = String(book.title || book.name || 'Lorebook');
+    const size = Number(book.jsSource?.length) || 0;
+    return `${title} — ${size ? `${(size / 1000).toFixed(1)}k chars of source` : 'source missing'}`;
+}
+
+/**
+ * The rebuild sheet: pick books, pick what context may help infer keys, pick the
+ * profile, look at the plan — then, only on an explicit Build + confirm, send.
+ * @param {{ item: object, avatar?: string, card?: object, books: object[],
+ *   scripted: object[], saved: string[] }} options
+ */
+function openRebuildSheet({ item, avatar, card, books, scripted, saved }) {
+    const config = rebuildConfig();
+    const profiles = rebuildProfiles();
+    let chosen;
+    try {
+        chosen = resolveRebuildProfile(profiles, config.profileId,
+            extension_settings.connectionManager?.selectedProfile || '');
+    } catch (error) {
+        toastr.error(`${error.message} Add a chat-completion profile in Connection Manager first.`, "Weaver's Vault");
+        return;
+    }
+    if (chosen.fellBack) {
+        toastr.info(`The saved rebuild profile is gone (ID: ${chosen.staleId}) — using '${chosen.profile.name || chosen.profile.model}'.`,
+            "Weaver's Vault");
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'wv-mode-overlay';
+    overlay.innerHTML = `
+        <div class="wv-modesheet wv-rbsheet">
+            <div class="wv-modehandle"></div>
+            <div class="wv-modehead">Rebuild scripted lorebooks</div>
+            <div class="wv-rbscroll">
+                <div class="wv-rbhint">A scripted book is JavaScript, so its entries have to be recovered by a model.
+                    One request per book, with no output cap. Nothing is sent until you press Build and confirm.</div>
+                <div class="wv-rbsection">Books</div>
+                <div class="wv-rbbooks">
+                    ${scripted.map((book, i) => `
+                        <label class="wv-rbbook">
+                            <input type="checkbox" class="wv-rbbookbox" data-book="${i}" ${book.jsSource ? 'checked' : 'disabled'} />
+                            <span class="wv-rbbooktext">${escapeHtml(rebuildBookLabel(book))}</span>
+                        </label>`).join('')}
+                </div>
+                <div class="wv-rbsection">Context (never emitted as entries)</div>
+                <div class="wv-rbtoggles">
+                    <label class="wv-rbtoggle"><input type="checkbox" data-ctx="card" ${config.context.card ? 'checked' : ''} /> Character card</label>
+                    <label class="wv-rbtoggle"><input type="checkbox" data-ctx="scenario" ${config.context.scenario ? 'checked' : ''} /> Scenario</label>
+                    <label class="wv-rbtoggle"><input type="checkbox" data-ctx="lorebookDescs" ${config.context.lorebookDescs ? 'checked' : ''} /> Lorebook titles + descriptions</label>
+                    <label class="wv-rbtoggle"><input type="checkbox" data-ctx="greetings" ${config.context.greetings ? 'checked' : ''} /> Greetings</label>
+                    <label class="wv-rbtoggle wv-rboff"><input type="checkbox" data-ctx="catalog" disabled /> Catalog page (needs one extra site fetch)</label>
+                </div>
+                <input class="wv-tokeninput wv-rbextra" type="text" placeholder="Extra names or aliases you know (optional)"
+                    value="${escapeHtml(config.extra)}" spellcheck="false" />
+                <div class="wv-rbsection">Connection</div>
+                <select class="wv-tokeninput wv-rbprofile">
+                    ${profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${profile.id === chosen.profile.id ? 'selected' : ''}>${escapeHtml(profile.name || profile.id)} — ${escapeHtml(profile.model || '')}</option>`).join('')}
+                </select>
+                <input class="wv-tokeninput wv-rbmodel" type="text" spellcheck="false"
+                    placeholder="Model override (blank = the profile's model)" value="${escapeHtml(config.model)}" />
+                <div class="wv-rbsummary">Choose books, then Preview.</div>
+                <details class="wv-rbdetails" hidden>
+                    <summary>Exact request</summary>
+                    <pre class="wv-rbpre"></pre>
+                </details>
+                <div class="wv-rbstatus" aria-live="polite"></div>
+            </div>
+            <div class="wv-rbfoot">
+                <button class="wv-abtn wv-abtn-neutral" type="button" data-rb="later"><span class="wv-abtnlabel">Later</span></button>
+                <button class="wv-abtn wv-abtn-neutral" type="button" data-rb="preview"><span class="wv-abtnlabel">Preview</span></button>
+                <button class="wv-abtn wv-abtn-primary" type="button" data-rb="build"><span class="wv-abtnlabel">Build</span></button>
+            </div>
+        </div>`;
+    root.appendChild(overlay);
+
+    const $ = (selector) => overlay.querySelector(selector);
+    const boxes = [...overlay.querySelectorAll('.wv-rbbookbox')];
+    const ctxBoxes = [...overlay.querySelectorAll('[data-ctx]')];
+    const summary = $('.wv-rbsummary');
+    const details = $('.wv-rbdetails');
+    const pre = $('.wv-rbpre');
+    const status = $('.wv-rbstatus');
+    const buildButton = $('[data-rb="build"]');
+
+    // Parts that already came back OK, so a failed part 14 does not re-bill 1-13
+    // (§5.3). Keyed by profile + model + the exact messages, which means a
+    // changed context or model simply misses instead of reusing stale text.
+    const partCache = new Map();
+
+    const toggles = () => Object.fromEntries(ctxBoxes.map(box => [box.dataset.ctx, box.checked]));
+    const selectedBooks = () => boxes
+        .filter(box => box.checked && !box.disabled)
+        .map(box => scripted[Number(box.dataset.book)])
+        .filter(book => book && book.jsSource);
+
+    const planFor = (book) => {
+        const context = contextFor({
+            card,
+            books,
+            extra: $('.wv-rbextra').value,
+            toggles: toggles(),
+        });
+        return planBuild({
+            text: book.jsSource,
+            fromJs: true,
+            context,
+            systemPrompt: config.systemJs,
+            countTokens: rebuildCountTokens(),
+        });
+    };
+
+    const describe = () => {
+        const picked = selectedBooks();
+        if (!picked.length) {
+            summary.textContent = 'No book selected.';
+            details.hidden = true;
+            return null;
+        }
+        const count = rebuildCountTokens();
+        const plans = picked.map(planFor);
+        const requests = plans.reduce((sum, plan) => sum + plan.requests.length, 0);
+        const tokens = plans.reduce((sum, plan) => sum
+            + plan.requests.reduce((part, messages) => part + messages.reduce((n, m) => n + count(m.content), 0), 0), 0);
+        summary.textContent = `${picked.length} book(s), ${requests} request(s), ~${tokens.toLocaleString()} prompt tokens, no output cap.`;
+        const first = plans[0].requests[0];
+        const clipped = first.map(message => ({
+            role: message.role,
+            content: message.content.length > 6000
+                ? `${message.content.slice(0, 6000)}\n\n… (${message.content.length - 6000} more chars)`
+                : message.content,
+        }));
+        pre.textContent = JSON.stringify({
+            profile: $('.wv-rbprofile').selectedOptions[0]?.textContent || '',
+            model: $('.wv-rbmodel').value.trim() || 'profile default',
+            max_tokens: 'omitted (boundless)',
+            temperature: REQUEST_TEMPERATURE,
+            messages: clipped,
+        }, null, 2);
+        details.hidden = false;
+        return picked;
+    };
+
+    for (const box of [...boxes, ...ctxBoxes, $('.wv-rbextra')]) {
+        box.addEventListener('change', () => { details.hidden = true; summary.textContent = 'Press Preview to price the request.'; });
+    }
+
+    $('[data-rb="later"]').addEventListener('click', () => overlay.remove());
+    $('[data-rb="preview"]').addEventListener('click', describe);
+
+    const setBusy = (busy, text = '') => {
+        buildButton.disabled = busy;
+        overlay.querySelector('[data-rb="preview"]').disabled = busy;
+        overlay.querySelector('.wv-rbprofile').disabled = busy;
+        overlay.querySelector('.wv-rbmodel').disabled = busy;
+        status.textContent = text;
+    };
+
+    buildButton.addEventListener('click', async () => {
+        const picked = describe();
+        if (!picked) return;
+        const profileId = $('.wv-rbprofile').value;
+        const profile = profiles.find(p => p.id === profileId) || chosen.profile;
+        const model = $('.wv-rbmodel').value.trim();
+        const label = model || profile.model || profile.name;
+        saveRebuildConfig({
+            profileId,
+            model,
+            extra: $('.wv-rbextra').value,
+            context: toggles(),
+        });
+        const requests = picked.reduce((sum, book) => sum + planFor(book).requests.length, 0);
+        const go = confirm(`Build ${picked.length} lorebook(s) with ${requests} request(s)?\n\nProfile: ${profile.name || profile.id}\nModel: ${label}\nOutput cap: none.\n\nThis spends tokens on that account.`);
+        if (!go) return;
+
+        const savedNames = [];
+        setBusy(true, 'Sending…');
+        try {
+            for (const book of picked) {
+                const plan = planFor(book);
+                const parts = [];
+                const cacheKeys = plan.requests.map(messages => partCacheKey(
+                    { profileId: profile.id, model: model || profile.model }, messages));
+                for (let i = 0; i < plan.requests.length; i += 1) {
+                    const messages = plan.requests[i];
+                    const cached = partCache.get(cacheKeys[i]);
+                    if (cached) {
+                        parts.push(...cached);
+                        status.textContent = `${book.title || book.name}: part ${i + 1} of ${plan.requests.length} already built.`;
+                        continue;
+                    }
+                    status.textContent = `${book.title || book.name}: request ${i + 1} of ${plan.requests.length}…`;
+                    const request = transportFor(messages);
+                    const overridePayload = { temperature: request.temperature };
+                    if (model) overridePayload.model = model;
+                    const data = await ConnectionManagerRequestService.sendRequest(
+                        profile.id,
+                        request.messages,
+                        request.maxTokens,
+                        { stream: request.stream, includePreset: request.includePreset, includeInstruct: false },
+                        overridePayload,
+                    );
+                    const parsed = parseReply(data?.content,
+                        { part: i + 1, total: plan.requests.length, resumable: plan.requests.length > 1 });
+                    parts.push(...parsed.entries);
+                    partCache.set(cacheKeys[i], parsed.entries);
+                    if (parsed.dropped) {
+                        console.warn(`[${extensionName}] ${book.title || book.name}: dropped ${parsed.dropped} contentless entr${parsed.dropped === 1 ? 'y' : 'ies'}`);
+                    }
+                }
+                const name = uniqueWorldName(book.title || book.name);
+                const worldInfo = { entries: {} };
+                for (const entry of parts) {
+                    const created = createWorldInfoEntry(name, worldInfo);
+                    if (!created) throw new Error('SillyTavern could not allocate a World Info entry.');
+                    created.comment = entry.comment;
+                    created.key = entry.key;
+                    created.keysecondary = entry.keysecondary;
+                    created.content = entry.content;
+                    created.order = entry.order;
+                    created.constant = entry.constant;
+                }
+                await saveWorldInfo(name, worldInfo, true);
+                savedNames.push(name);
+                ledgerAdd(item, 'lorebook');
+                toastr.success(`Rebuilt '${name}' (${parts.length} ${parts.length === 1 ? 'entry' : 'entries'}).`, "Weaver's Vault");
+            }
+            await updateWorldInfoList();
+            if (avatar) {
+                const stamped = await stampVaultProvenance(avatar, { vault_lorebooks: [...saved, ...savedNames] });
+                if (stamped) await getCharacters();
+            }
+            overlay.remove();
+        } catch (error) {
+            console.error(`[${extensionName}] rebuild failed`, error);
+            const measurable = error instanceof RebuildError;
+            setBusy(false, measurable && error.part
+                ? `Failed at part ${error.part} of ${error.total} — '${error.message}'`
+                : `Failed: ${error.message}`);
+            if (measurable) {
+                toastr.error(`${error.message}${error.resumable ? ' The sheet is still open; press Build to retry.' : ''}`,
+                    "Weaver's Vault rebuild");
+            } else {
+                toastr.error(`${error.message}. Nothing was saved.`, "Weaver's Vault rebuild");
+            }
+        }
+    });
+
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) overlay.remove();
+    });
+}
 /** A JanitorAI import: the card, then whichever of its books can be had. */
 async function importJanitorCard(item, character) {
     const avatar = await importJannyCharacter(item, character, '/janitor/card', janitorFiles);

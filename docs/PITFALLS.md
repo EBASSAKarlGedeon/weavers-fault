@@ -823,3 +823,32 @@ and in `dispose()`.
 **Check.** With the sampler on the browser PID: the first observation after birth is already
 `0x200180` (0 ms of button at 10 ms resolution), and the two times Chrome rebuilds the window during
 start the style comes back 17 ms and 85 ms later. Before the watcher: 1054–6896 ms.
+
+## 42. A headless browser that describes itself is blocked, not challenged
+
+**Symptom.** A `--headless=new` vault browser gets `403 Access Restricted / This request was blocked by
+our firewall' on janitorai.com — a block page, with no Cloudflare interstitial, nothing to click, and a
+retry that fails identically. The same profile in a visible Chrome loads the same URL fine.
+
+**Measured cause.** The first headless build copied the identity from *the headless page itself*, so the
+UA it sent was `...HeadlessChrome/158.0.8127.37...` (2026-11-25). The firewall reads the UA string, not
+the renderer: it answers a self-identifying headless browser with a block, not a challenge, so none of the
+challenge handling (reload, `_cf_chl_opt`, `cf-mitigated`) ever applies. Two further identity traps were
+measured the same day: `navigator.userAgentData` is **empty on `about:blank`** (brands `[]`, which no real
+Chrome reports), and headless reports `outerWidth/Height` 800x600 whatever the window bounds say, i.e.
+`outer < inner` — impossible for a real window.
+
+**Rule.** Never let the headless browser describe the machine. Measure the identity once with a **real
+headful Chrome** on the same machine (`ChromeBackend.measureIdentity()`: parked, taskbar-hidden, loads
+only the vault's own origin, no site traffic), cache it in `headless-identity.json` beside the profile,
+and apply it before the first site request: `Emulation.setUserAgentOverride` with the UA string copied
+verbatim (`Chrome/<major>.0.0.0` is already what a desktop Chrome sends), `Emulation.setDeviceMetricsOverride`
+with the measured screen and DPR, and `Browser.setWindowBounds` with an outer size at least as large as the
+viewport. Scrub `HeadlessChrome` from any product string that reaches the page. Refuse to start headless if
+no usable identity was measured — a guess is a different fingerprint, not a fix.
+
+**Check.** `node scripts/smoke-headless-backend.mjs` (local origin, no site traffic): the page must report
+`brands: [Chromium/158, Not.A/Brand/24, Google Chrome/158]`, `saysHeadless: false`, the machine screen
+(1536x864, dpr 1.25), `outer > inner`, and `osWindows: 0` for the profile's processes. Measured 2026-11-25:
+start 12.3 s for the first run (measuring launch + headless launch), 8 processes, 0 windows.
+

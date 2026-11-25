@@ -638,8 +638,14 @@ function renderStatus(text, isError = false) {
 // Glaze's number formatting: 1.0k / 1.0kk.
 function fmtCount(n) {
     n = Number(n) || 0;
-    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}kk`;
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    // Same units the site prints (991k, 1M); the range extends to 99 billion,
+    // above which the full number is shown rather than rounding it away —
+    // stats.message passed 1,000,000 within days of the badge fix.
+    const trim = v => { const s = v >= 100 ? String(Math.round(v)) : v.toFixed(1); return s.endsWith('.0') ? s.slice(0, -2) : s; };
+    if (n >= 100e9) return String(Math.round(n));
+    if (n >= 1e9) return `${trim(n / 1e9)}B`;
+    if (n >= 1e6) return `${trim(n / 1e6)}M`;
+    if (n >= 1e3) return `${trim(n / 1e3)}k`;
     return String(n);
 }
 

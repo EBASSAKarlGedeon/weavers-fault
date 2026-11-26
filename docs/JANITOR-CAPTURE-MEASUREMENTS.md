@@ -200,8 +200,11 @@ them, so the Mage's Association (4,124ch), Atlas Institute (2,114ch), Clock Towe
 the concept block (8,678ch: Mystery, Magecraft, True Magic, Magic Circuits, Vampires, Dead Apostles
 with all eight ranks, Mystic Eyes, Noble Colors, True Ancestors) were welded onto Katya Kambanellis
 as one 27k entry with Katya's keywords. Splitting at `[System OOC]: This entry contains the
-information for …` and at `[Concept #1]` yields 320 entries / 1,020,281 chars / 922 keys, with the
-topic entries carrying their own vocabulary. Content is byte-identical, only the grouping changed.
+information for …`, at `[Concept #1]`, `[Holy Church]:`, `[Other Locations]:` and the standalone
+`[Abilities]:` block yields 323 entries / 1,020,277 chars / 939 keys, with the topic entries carrying
+their own vocabulary (Concepts: Mystery, Magecraft, True Magic, Magic Circuits, Vampires, Dead
+Apostles, Mystic Eyes, True Ancestors, Noble Colors). Content is byte-identical, only the grouping
+changed.
 
 **Provenance is asserted, not assumed.** Every entry's content is checked to be a contiguous substring
 of the captured union (316/316 pass, 0 miss). Nothing was reworded, nothing invented.

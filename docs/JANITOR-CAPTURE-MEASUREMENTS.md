@@ -211,6 +211,26 @@ Open: 194 sprite URLs still point at `ella.janitorai.com`; and how many entries 
 now governed by the world-info budget (default 25% of context) exactly as the site's own selection
 governed it.
 
+## 2f. Cross-check against a live prompt (no keywords)
+
+A real chat's system prompt was captured by hand (106,727 chars, persona plus card, no probe words)
+and compared with our two artifacts. A scan every 2,000 chars says: 0-43k is the card description,
+44k-106k is lorebook text, and **every 120-char window in the lore span is inside the 778-block
+union** — nothing in that prompt was missing from the capture.
+
+Where the sections live:
+
+| Section | Home |
+|---|---|
+| `[Masters]`, `[NPCs]`, `[Alter-Persona]`, `[First Servant]`, `[Second Servant]`, `[OOC System]` | card description |
+| `[Mystic Codes]` | split: description and a book entry |
+| `[Other Locations]`, `[Abilities]`, `[Noble Colors]`, `[Example Dialogues]` | lorebooks |
+
+This is the answer to "is the world of magi in there too": the world material is not one book, it is
+the card's own description (masters, NPCs, mystic codes, the OOC frame) **plus** book entries
+(locations, abilities, noble colors, rules). A rebuild that only ships the .json keeps the second half;
+the first half is the character card's description, which was captured separately (43,801 chars).
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region

@@ -242,39 +242,46 @@ the card's own description (masters, NPCs, mystic codes, the OOC frame) **plus**
 (locations, abilities, noble colors, rules). A rebuild that only ships the .json keeps the second half;
 the first half is the character card's description, which was captured separately (43,801 chars).
 
-## 2g. Final pass: what belonged to someone else
+## 2g. Sheets welded to the wrong owner
 
-Some sheets in the source have no `- Servant Name:` line, so the name-marker pass welded them onto
-the previous entry. Four entries carried a stranger's sheet:
+Some sheets in the source have no `- Servant Name:` line, so a name-marker pass welds them onto the
+previous entry. Two such cases were real contamination:
 
 | Entry | Foreign content | Identified by |
 |---|---|---|
 | Medea | 2,188ch sheet | Spirit Origin names Ramesses II / Nefertari → **Ozymandias** |
 | Van-Fem | 1,461ch + 2,064ch | Spirit Origin says Cleopatra VII → **Cleopatra**; Charlemagne's paladin → **Bradamante** |
-| Scáthach | `[OOC]: The following characters are listed as Deceased …` plus `[Male Characters]` / `[Female Characters]` and the `… present in the world …` header | headers |
-| Luviagelita Edelfelt | `[Character Definitions]`, `[System Inclusion]`, `[Miyama Town Location Images]`, `[Shinto Location Images]` | headers |
 
-The Scáthach block turned out to be one unified **Deceased Characters** entry (the OOC line, `---`, the
-male list, the female list) followed by a separate `… present in the world/universe …` header; it is
-shipped as two entries (`Deceased Characters`, 3,578ch, and the 156ch `Present Characters` header that
-introduces Rin's sheet), not as a male/female pair.
+They are now separate entries with the author's keywords (`Ozymandias`, `Ramesses II`, `King of Kings`,
+`Sun God`; `Cleopatra`, `The Last Pharaoh`; `Bradamante`, `Knight of White Wings`, …), and each recovered
+sheet got a single `- Servant Name:` line re-attached — the only text we added, flagged here so it is
+never mistaken for captured prose.
 
-All were split into their own entries with the author's keywords (`Ozymandias`, `Ramesses II`,
-`King of Kings`, `Sun God`; `Cleopatra`, `The Last Pharaoh`; `Bradamante`, `Knight of White Wings`, …).
-The three recovered sheets got a single `- Servant Name:` line re-attached — the only text we added,
-marked here so it is never mistaken for captured prose.
+**What this exposed.** Splitting on sheet-name lines is wrong: the author writes *container* entries that
+hold several sheets. Fixing the two above by hand-rolling more splits (Deceased/Male/Female, images as
+four entries, Hansa pulled out of Holy Church) made the book diverge further from the source. The
+containers, recovered from the union by offset, are:
 
-One more header sat at the end of **Holy Church**: `[Executors]:` followed by `<[Hansa Cervantes]>:` whose body
-(`- Name: Hansa Cervantes`) had been pulled out as its own sheet. Both lines moved to the Hansa entry, so
-the header travels with its body.
+| Entry | What it holds | Chars |
+|---|---|---|
+| Present Characters | OOC line + Rin, Shirou, Sakura, Shinji, Ayako, Luvia | 14,003 |
+| Deceased Characters | OOC line + `[Male Characters]` + `[Female Characters]` | 3,578 |
+| Other Characters | `[System]` line + Lord El-Melloi II, Reines, Touko | 7,519 |
+| Holy Church | topic + `[Deceased Members]` + `[Executors]` + Hansa + `[Quartet]` | 13,905 |
+| Location Images | `[System Inclusion]` + Miyama + Shinto + Other Locations images | 3,067 |
+| ORT | intro + `[Abilities]` + the `[SYSTEM]` slumber note | 2,814 |
+| Clock Tower (Wandering Sea) | the duplicate `[System OOC] … Clock Tower.` header starts a second entry | 969 |
 
-Audit after the split (331 entries / 1,020,320 chars / 958 keys; a 24-char `[Character Definitions]:`
-header with nothing under it was dropped): 318 sheet entries, each carrying
-exactly one name line that matches its comment; no duplicate openings; every content a substring of
-the union except those three header lines; all entries `position 4 / depth 10`.
+**Proof of boundary fidelity.** Concatenating the entries in order reproduces the union exactly, except
+the `\n\n` separators, the `- Servant Name:` title lines (kept as the entry titles) and the empty
+26-char `[Character Definitions]:` header, which was dropped. 317 entries / 1,020,331 chars / 957 keys;
+one constant entry (`Grail War Rules`); every entry `position 4 / depth 10`.
 
-Legitimate multi-form entries were left alone: Dioscuri (Castor + Pollux), Trung Sisters
-(Trắc + Nhị, split by `- Individual Name:`), Valkyrie (three), Demeter (`- Form Name: Demeter=Erinys`).
+Two entries shared a title: the second **Gilgamesh** sheet (Lawful-Good, the wise king) is now
+**Gilgamesh (Caster)**.
+
+Legitimate multi-form entries stay whole: Dioscuri (Castor + Pollux), Trung Sisters (Trắc + Nhị, split by
+`- Individual Name:`), Valkyrie (three bodies), Demeter (`- Form Name: Demeter=Erinys`).
 
 **Macros:** the union carried no `Hiro` at all; the captured description had two, because the site
 substitutes `{{user}}` with the account's persona name at render time. Both were restored to

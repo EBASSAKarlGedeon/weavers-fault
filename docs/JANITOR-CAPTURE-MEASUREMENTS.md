@@ -287,6 +287,22 @@ Legitimate multi-form entries stay whole: Dioscuri (Castor + Pollux), Trung Sist
 substitutes `{{user}}` with the account's persona name at render time. Both were restored to
 `{{user}}` so the text can be reused as a card.
 
+
+## 2h. The segmenter that came out of §2g
+
+The failure in §2g was a wrong contract, not a bug in a heuristic: the capture does not mark
+entry starts with a generic header, it marks **ten specific forms**, and everything else that looks
+like a header is a section inside an entry. `lorebook-segment.js` now encodes exactly those forms
+(table in `docs/LOREBOOK-BUILDER.md`) and reports anything it cannot prove as a flag instead of
+picking a boundary.
+
+Re-measured on the same capture: 313 entries, 301 sheets, 7 containers, 4 topics, 1,020,281
+characters, 310 of the 317 known boundaries matched, and the three genuine welds (Ozymandias in
+Medea, Cleopatra/Bradamante in Van-Fem, ORT in Other Characters) now arrive as review flags. The
+verifier (`lorebook-verify.js`) then blocks the book on two real duplicate titles — Gilgamesh
+(two manifestations) and Clock Tower (two topics) — both of which were resolved by hand in the
+shipped book as **Gilgamesh (Caster)** and **Clock Tower (Wandering Sea)**.
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region

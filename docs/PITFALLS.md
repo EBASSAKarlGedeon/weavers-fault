@@ -1087,3 +1087,31 @@ profile": asserts the client builds the template path from MODULE and mounts int
 z-ai/glm-5.3-flash, NanoGPT — z-ai/glm-5.1:thinking, Openrouter —
 nvidia/nemotron-3.5-lightning:free) and the note reading "Rebuilds send to 'Openrouter'
 (nvidia/nemotron-3.5-lightning:free), following the active profile.".
+
+## #52 Splitting on character-sheet lines shattered the authored containers
+
+**Symptom.** The rebuilt Fate Limitless book had the author's 317 entries, yet six sheets were
+welded to the entry before them: Ozymandias inside Medea, Cleopatra and Bradamante inside Van-Fem,
+ORT inside Other Characters. Every count looked right, so the loss was only visible by reading the
+book.
+
+**Measured cause.** The first builder treated every `- Servant Name:` / `- Name:` line as the
+start of an entry. In this capture those markers appear in two places: real sheet starts, and
+section rows *inside* an authored container (Present Characters, Other Characters, Holy Church,
+Location Images). The containers are single lorebook entries that hold several named blocks, and
+their rows are separated by `---`, `###` or `<[Name]>:` lines — never by a blank line. Segmenting
+on the field name alone cannot tell a container row from a sheet start.
+
+**Rule.** Boundaries come from a fixed table of openers measured on the capture (ten forms: servant
+sheet, named sheet after a blank line, the `[System OOC]: … information for X.` topic line, and the
+seven container headers). Anything else is body text, however much it looks like a header:
+`[Example Dialogues]:`, `[Riding A+]:`, `[Extra Lore]`, `[Abilities]`, `[NOTE: …]`, `[Concept #N]`
+and `[---]` are all sections, not entries. A `- Name:` line opens an entry only when the line
+before it is blank; after `---` or `###` it is a container row.
+
+**Check.** `public/scripts/extensions/weavers-vault/lorebook-segment.js` (OPENERS + blankBefore
+rule) and its regression tests in `tests/vault/lorebook-segment.test.js` — "keeps a container with
+--- sections as one entry", "keeps the image block … as one entry", "'- Name:' after --- stays
+inside the container". Acceptance run on `data/_fate-union.txt`: 313 entries, 301 sheets, 7
+containers, 4 topics, 310/317 known boundaries; the three remaining welds are reported by the
+`multiple-sheet-blocks` / `candidate-split` flags instead of disappearing.

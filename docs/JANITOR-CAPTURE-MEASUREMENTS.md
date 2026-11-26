@@ -242,6 +242,34 @@ the card's own description (masters, NPCs, mystic codes, the OOC frame) **plus**
 (locations, abilities, noble colors, rules). A rebuild that only ships the .json keeps the second half;
 the first half is the character card's description, which was captured separately (43,801 chars).
 
+## 2g. Final pass: what belonged to someone else
+
+Some sheets in the source have no `- Servant Name:` line, so the name-marker pass welded them onto
+the previous entry. Four entries carried a stranger's sheet:
+
+| Entry | Foreign content | Identified by |
+|---|---|---|
+| Medea | 2,188ch sheet | Spirit Origin names Ramesses II / Nefertari → **Ozymandias** |
+| Van-Fem | 1,461ch + 2,064ch | Spirit Origin says Cleopatra VII → **Cleopatra**; Charlemagne's paladin → **Bradamante** |
+| Scáthach | card-level `[Male Characters]`, `[Female Characters]` | headers |
+| Luviagelita Edelfelt | `[Character Definitions]`, `[System Inclusion]`, `[Miyama Town Location Images]`, `[Shinto Location Images]` | headers |
+
+All were split into their own entries with the author's keywords (`Ozymandias`, `Ramesses II`,
+`King of Kings`, `Sun God`; `Cleopatra`, `The Last Pharaoh`; `Bradamante`, `Knight of White Wings`, …).
+The three recovered sheets got a single `- Servant Name:` line re-attached — the only text we added,
+marked here so it is never mistaken for captured prose.
+
+Audit after the split (332 entries / 1,020,345 chars / 957 keys): 318 sheet entries, each carrying
+exactly one name line that matches its comment; no duplicate openings; every content a substring of
+the union except those three header lines; all entries `position 4 / depth 10`.
+
+Legitimate multi-form entries were left alone: Dioscuri (Castor + Pollux), Trung Sisters
+(Trắc + Nhị, split by `- Individual Name:`), Valkyrie (three), Demeter (`- Form Name: Demeter=Erinys`).
+
+**Macros:** the union carried no `Hiro` at all; the captured description had two, because the site
+substitutes `{{user}}` with the account's persona name at render time. Both were restored to
+`{{user}}` so the text can be reused as a card.
+
 ## 3. The defect this exposed in our own counter
 
 **M10 — `closedLoreEntries` over-counts whenever an entry contains a blank line.** The `BB` region

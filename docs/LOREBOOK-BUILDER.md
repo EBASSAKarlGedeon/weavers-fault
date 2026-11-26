@@ -217,6 +217,14 @@ The CLI prints it as `fingerprint`.
 `captureId` is null unless the caller passes one; the capture JSON has the card id, the `.txt`
 does not, so the rebuild CLI cannot invent it.
 
+## Install and read back
+
+    node tools/install-lorebook.mjs data/_go-keyed.json <worlds-dir>/<Name>.json
+
+Fills the World Info defaults the builder does not decide, keeps the provenance stamp, then reads
+the file back and refuses if an entry lost its content or keys, if the count changed on disk, or if
+the stamp is missing or disagrees.
+
 ## Limits
 
 - A container whose rows are separated by blank lines instead of `---`/`###` would be split. The

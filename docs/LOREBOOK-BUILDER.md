@@ -165,6 +165,35 @@ The rename is the interesting one: two entries are literally titled **Goetia**, 
 gate accepts a parenthesised qualifier and nothing else — the same trick the Fate book needed for
 `Gilgamesh (Caster)`.
 
+## Author keys (P4)
+
+A closed Janitor lorebook arrives as text: no entry list, no ids, no keys. What the author did
+publish is inside the text — a sheet declares its own `- Keywords:` and names its spirit, and the
+author writes the variants they expect to trigger on:
+
+    - Servant Name: Jingle Abel Meunière;
+    - Keywords: "Meunière","Meuniere","Coffin Staff Officer",
+
+    node tools/author-keys.mjs data/_fate-union.txt data/_go-union.txt --out data/author-keys.json
+
+The store is keyed by normalised title, so it is a *library*, not a per-book artifact: a second
+card by the same author that shares the servant sheets picks the keys up unchanged. Measured on
+the two Fate books: the Fate store matches **12 of Grand Order's 27 entries by name** (the shared
+Grail War rules entry plus eleven Servants).
+
+| Store | Names | Keys | Sheets with declared keywords |
+| --- | --- | --- | --- |
+| Fate Limitless + Grand Order | 322 | 383 | 9 |
+
+Harvesting also descends into containers: a `[Name: Kiara Sessyoin` row with its own Keywords line
+becomes `kiara sessyoin => [Kiara Sessyoin, Dr. Kiara, Therapist Kiara]`, so when the review splits
+that container the new entry inherits the author's keys instead of falling back to the title.
+
+Keys follow the author when the store has them (title, slash parts and declared variants, all from
+the store) and fall back to `defaultKeys` otherwise. A key two entries would both claim is reported,
+not merged: `Caenis` vs `Caenis (Summer)` is the author having two sheets for one spirit, which is
+the same collision the title gate rejects.
+
 ## Limits
 
 - A container whose rows are separated by blank lines instead of `---`/`###` would be split. The
@@ -172,5 +201,5 @@ gate accepts a parenthesised qualifier and nothing else — the same trick the F
   and the review table (P3) is where it gets caught.
 - Titles for unanchored entries are cut at 60 characters and flagged; they are placeholders.
 - No UI yet. The next steps are P3 (review table: entries, flags, rename/split/merge, then
-  import), P4 (author keys from the capture's entry list) and P5 (provenance so a rebuild can
+  import) and P5 (provenance so a rebuild can
   update an existing book instead of duplicating it).

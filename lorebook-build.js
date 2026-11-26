@@ -4,6 +4,7 @@
 // full SillyTavern schema, keys and an order, and the verifier runs before anything
 // is returned. A caller cannot get a book without a report.
 
+import { authorKeysFor } from './lorebook-keys.js';
 import { applyReview } from './lorebook-review.js';
 import { segmentLorebook } from './lorebook-segment.js';
 import { verifyLorebook } from './lorebook-verify.js';
@@ -43,6 +44,23 @@ const DEFAULTS = {
  * Keys for a title when the author supplied none.
  * "Saber / Artoria" -> ["Saber", "Artoria"]; the parenthetical alias is kept whole.
  */
+function keyId(value) {
+    return String(value ?? '').trim().toLowerCase();
+}
+
+function uniqueKeys(keys) {
+    const seen = new Set();
+    const out = [];
+    for (const key of keys) {
+        const text = String(key ?? '').trim();
+        const id = keyId(text);
+        if (!text || seen.has(id)) continue;
+        seen.add(id);
+        out.push(text);
+    }
+    return out;
+}
+
 export function defaultKeys(title) {
     const text = String(title ?? '').trim();
     if (!text) return [];
@@ -73,14 +91,19 @@ export function buildLorebook(input = {}) {
     const authorKeys = input.authorKeys || null;
 
     const entries = {};
+    let fromAuthor = 0;
     review.entries.forEach((entry, index) => {
         const title = entry.title;
-        const author = authorKeys ? authorKeys[String(title).toLowerCase()] : null;
+        const author = authorKeysFor(authorKeys, title);
+        if (author) fromAuthor += 1;
+        // The title always triggers the entry; the author's own keys ride on top of the
+        // generated ones instead of replacing them (a sheet's keywords rarely repeat its name).
+        const generated = defaultKeys(title);
         const keys = keysFor
-            ? keysFor(title, entry)
-            : Array.isArray(author) && author.length
-              ? author.slice()
-              : defaultKeys(title);
+            ? keysFor(title, entry) || generated
+            : author
+              ? uniqueKeys(author)
+              : generated;
         entries[String(index)] = {
             ...DEFAULTS,
             ...template,

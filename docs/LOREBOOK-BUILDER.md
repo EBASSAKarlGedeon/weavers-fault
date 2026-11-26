@@ -194,6 +194,29 @@ the store) and fall back to `defaultKeys` otherwise. A key two entries would bot
 not merged: `Caenis` vs `Caenis (Summer)` is the author having two sheets for one spirit, which is
 the same collision the title gate rejects.
 
+## Provenance (P5)
+
+Every built book carries what it was built from, so a re-run can be checked against the capture
+it claims and a fingerprinted review cannot drift unnoticed:
+
+    "extensions": { "vault": {
+      "version": 1,
+      "tool": "weavers-vault/lorebook-build",
+      "captureId": null,
+      "source":  { "chars": 286547, "lines": 1773, "fingerprint": "646935d947960083" },
+      "review":  { "fingerprint": "1e5aa3326fc77047", "renames": 1, "splits": 11, "merges": 0, "problems": 0 },
+      "segmentation": { "entries": 16, "flags": 34 },
+      "result":  { "entries": 27, "characters": 286495, "ok": true }
+    } }
+
+The fingerprint is FNV-1a 64-bit over the source text (pure, so the extension and the CLI compute
+the same value): a content check, not a signature. `review.fingerprint` hashes the decisions with
+sorted keys, so the same decisions always stamp the same value and any change to them is visible.
+The CLI prints it as `fingerprint`.
+
+`captureId` is null unless the caller passes one; the capture JSON has the card id, the `.txt`
+does not, so the rebuild CLI cannot invent it.
+
 ## Limits
 
 - A container whose rows are separated by blank lines instead of `---`/`###` would be split. The

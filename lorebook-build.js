@@ -5,6 +5,7 @@
 // is returned. A caller cannot get a book without a report.
 
 import { authorKeysFor } from './lorebook-keys.js';
+import { buildProvenance } from './lorebook-provenance.js';
 import { applyReview } from './lorebook-review.js';
 import { segmentLorebook } from './lorebook-segment.js';
 import { verifyLorebook } from './lorebook-verify.js';
@@ -127,12 +128,21 @@ export function buildLorebook(input = {}) {
         entries: Object.values(entries),
         authorKeys,
     });
+    const provenance = buildProvenance({
+        text: input.text,
+        captureId: input.captureId,
+        decisions: input.decisions || {},
+        review,
+        segmentation,
+        report,
+    });
     return {
-        book: { entries },
+        book: { entries, extensions: { vault: provenance } },
         report: {
             ...report,
             segmentation: { stats: segmentation.stats, flags: segmentation.flags },
             review: { applied: review.applied, problems: review.problems },
+            provenance,
         },
     };
 }

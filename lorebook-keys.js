@@ -36,7 +36,8 @@ function uniqueByName(values) {
     return out;
 }
 
-function titleKeys(title) {
+/** titles = every normalised title in the book: a qualified sheet does not claim the bare name. */
+function titleKeys(title, titles) {
     const out = [];
     const push = (value) => {
         const text = String(value || '').trim();
@@ -45,7 +46,9 @@ function titleKeys(title) {
     push(title);
     for (const part of String(title || '').split(/\s*\/\s*/)) push(part);
     const bare = String(title || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
-    push(bare);
+    // "Scáthach (Summer)" is its own sheet: the bare name belongs to the base sheet,
+    // so it is only a key here when no entry is titled that.
+    if (bare && !(titles && titles.has(normaliseName(bare)))) push(bare);
     return out;
 }
 
@@ -76,6 +79,7 @@ export function buildKeyStore(entries) {
     const store = Object.create(null);
     const owners = new Map();
     const collisions = [];
+    const titles = new Set((entries || []).map((entry) => normaliseName(entry.title)).filter(Boolean));
     let authored = 0;
     for (const entry of entries || []) {
         const title = String(entry.title || '').trim();
@@ -83,7 +87,7 @@ export function buildKeyStore(entries) {
         if (!key) continue;
         const declared = harvestKeys(entry.content);
         if (declared.length) authored += 1;
-        const keys = [...titleKeys(title)];
+        const keys = [...titleKeys(title, titles)];
         for (const declaredKey of declared) {
             if (!keys.some((existing) => normaliseName(existing) === normaliseName(declaredKey))) keys.push(declaredKey);
         }
@@ -93,7 +97,7 @@ export function buildKeyStore(entries) {
             if (!declared.length) continue;
             const name = normaliseName(sheet.name);
             if (!name || store[name]) continue;
-            store[name] = uniqueByName([...titleKeys(sheet.name), ...declared]);
+            store[name] = uniqueByName([...titleKeys(sheet.name, titles), ...declared]);
             authored += 1;
         }
         for (const single of keys) {

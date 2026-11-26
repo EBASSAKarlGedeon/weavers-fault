@@ -127,7 +127,10 @@ function checkTitles(entries, fail, warn) {
         }
         // Containers start with an OOC/System line, so the first name inside is not the title.
         const name = roleOf(entry) === 'container' ? null : sheetNameOf(entry.content);
-        if (name && normaliseName(name) !== key) {
+        // "Gilgamesh (Caster)" disambiguates two sheets of the same spirit; the body keeps
+        // the authored name, so the qualifier is allowed but nothing else is.
+        const base = title.replace(/\s*\([^)]*\)\s*$/, '').trim();
+        if (name && normaliseName(name) !== key && normaliseName(name) !== normaliseName(base)) {
             fail('titles', 'title-mismatch', label + ': body names ' + JSON.stringify(name));
         }
         if (!name && roleOf(entry) === 'sheet') {

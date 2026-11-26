@@ -4,6 +4,7 @@
 // full SillyTavern schema, keys and an order, and the verifier runs before anything
 // is returned. A caller cannot get a book without a report.
 
+import { applyReview } from './lorebook-review.js';
 import { segmentLorebook } from './lorebook-segment.js';
 import { verifyLorebook } from './lorebook-verify.js';
 
@@ -67,11 +68,12 @@ export function defaultKeys(title) {
 export function buildLorebook(input = {}) {
     const template = input.template && typeof input.template === 'object' ? input.template : {};
     const segmentation = segmentLorebook(input.text);
+    const review = applyReview({ entries: segmentation.entries, decisions: input.decisions || {} });
     const keysFor = typeof input.keysFor === 'function' ? input.keysFor : null;
     const authorKeys = input.authorKeys || null;
 
     const entries = {};
-    segmentation.entries.forEach((entry, index) => {
+    review.entries.forEach((entry, index) => {
         const title = entry.title;
         const author = authorKeys ? authorKeys[String(title).toLowerCase()] : null;
         const keys = keysFor
@@ -107,6 +109,7 @@ export function buildLorebook(input = {}) {
         report: {
             ...report,
             segmentation: { stats: segmentation.stats, flags: segmentation.flags },
+            review: { applied: review.applied, problems: review.problems },
         },
     };
 }

@@ -136,6 +136,35 @@ inside a sheet (`[Example Dialogues]:`) and a section inside a container
 table is where the eleven structural splits get confirmed. A rule here would have split the Fate
 book's Location Images entry into five.
 
+## Review pass (P3)
+
+The segmenter never guesses. Everything it cannot prove is a *candidate*, and a candidate is
+only ever a suggestion until someone says yes:
+
+    node tools/review-lorebook.mjs data/_go-union.txt data/_go-review.html
+
+The page lists every entry with its title (editable), its flags, and its candidates with line
+numbers. Tick `split before line N`, tick `merge up` where a split was wrong, fix the titles, then
+download `decisions.json` and pass it along:
+
+    node tools/rebuild-lorebook.mjs data/_go-union.txt data/_go-book.json - data/_go-decisions.json
+
+`-` is the empty keys slot. Decisions are applied before assembly and re-verified, so a book that
+was not `ok` can only become one by proving it:
+
+| Grand Order | before review | after review |
+| --- | --- | --- |
+| Entries | 16 | **27** |
+| Characters | 286,517 | 286,495 (22 separators) |
+| Containers | 0 | 11 |
+| Review actions | — | 11 splits + 1 rename |
+| Gate | 1 duplicate title | **ok** |
+
+The rename is the interesting one: two entries are literally titled **Goetia**, so one becomes
+`Goetia (Servant)`. The body still says `- Servant Name: Goetia;` and stays verbatim, so the title
+gate accepts a parenthesised qualifier and nothing else — the same trick the Fate book needed for
+`Gilgamesh (Caster)`.
+
 ## Limits
 
 - A container whose rows are separated by blank lines instead of `---`/`###` would be split. The

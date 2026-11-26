@@ -1115,3 +1115,24 @@ rule) and its regression tests in `tests/vault/lorebook-segment.test.js` — "ke
 inside the container". Acceptance run on `data/_fate-union.txt`: 313 entries, 301 sheets, 7
 containers, 4 topics, 310/317 known boundaries; the three remaining welds are reported by the
 `multiple-sheet-blocks` / `candidate-split` flags instead of disappearing.
+
+## #53 The review split emitted its halves backwards, and gave the separator's kind to the wrong half
+
+**Symptom** — Applying eleven splits to the Grand Order capture produced 19 entries with broken
+boundaries: `coverage/uncovered-text` between Team A and Scáthach, and a second entry carrying
+`vaultRole: unknown` when it should have been a container. The run still reported `ok: false`,
+which is the only reason it was not installed.
+
+**Measured cause** — Two independent mistakes in `applyReview`. (1) The tail was pushed to the
+output before the head, so every split reversed the pair. (2) A cut's `kind` was copied to the
+piece that *ended* at the cut instead of the piece that *started* there, so the container role
+landed on the preceding servant entry. Both were invisible in the counts: entries, characters and
+keys all looked plausible.
+
+**Rule** — A split is computed as ordered pieces over the original content: the pair `(from, to)`
+comes from consecutive cut offsets, offsets are absolute (`entry.start + from`), and a piece's kind
+is the kind of the cut it *starts* at. Never rebuild one half from the other.
+
+**Check** — `tests/vault/lorebook-review.test.js` asserts both halves are exactly
+`TEXT.slice(start, end)`, that only whitespace separates them, and that the piece starting at a
+`bracket-header` cut carries `role: 'container'`.

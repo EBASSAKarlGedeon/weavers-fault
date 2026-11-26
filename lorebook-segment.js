@@ -95,6 +95,15 @@ export const SECTION_PATTERN = /^\[[^\]\n]{0,90}\]:?/;
 /** A bracket paragraph (long text, not a short heading) that may be its own entry. */
 export const PARAGRAPH_BRACKET_PATTERN = /^\[[^\]\n]{60,}/;
 
+/**
+ * Bracketed lines that are sections, never entries. The list is measured, not guessed:
+ * these are the heads the Fate captures use inside an entry.
+ */
+export const SECTION_HEAD_WORDS = /^\[?(?:Example Dialog(?:ue)?s?|Dialogues|Riding|Extra Lore|Abilities|SYSTEM|System|OOC|NOTE|Concept|Noble Phantasm|Skills|Servant Sprites|Keywords|Appearance|Personality|---)/i;
+
+/** "[Additional Staff List]:" / "- [Team A]:" at the start of a block: maybe an entry, maybe a section. */
+export const HEADER_BRACKET_PATTERN = /^-?\s*\[([^\]\n]{2,80})\]:\s*$/;
+
 /** Name lines: two of them in one entry mean two named sheets. */
 export const SHEET_FIELD_PATTERN = /^-\s*(?:Servant Name|Name):/gm;
 
@@ -228,9 +237,16 @@ export function segmentLorebook(text) {
 
         const body = content.split('\n');
         for (let i = 1; i < body.length; i += 1) {
+            const header = HEADER_BRACKET_PATTERN.exec(body[i]);
+            if (header && !SECTION_HEAD_WORDS.test('[' + header[1])) {
+                // Same syntax as a section, so it is only ever a candidate: the Grand Order
+                // book opens whole entries with "[First Singularity: … - NPCs]:".
+                candidates.push({ line: i, kind: 'bracket-header', text: body[i].trim().slice(0, 70) });
+                continue;
+            }
             if (!PARAGRAPH_BRACKET_PATTERN.test(body[i])) continue;
             if (body[i - 1].trim() !== '') continue;
-            candidates.push({ line: i, text: body[i].slice(0, 70) });
+            candidates.push({ line: i, kind: 'paragraph', text: body[i].slice(0, 70) });
         }
         if (candidates.length) {
             entryFlags.push('candidate-split');

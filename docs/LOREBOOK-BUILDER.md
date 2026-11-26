@@ -47,7 +47,7 @@ slice), `title`, `role`, `rule`, `confidence`, `flags` and `candidates`.
 | `low-confidence` | no explicit opener (text start, leading block) — review the boundary |
 | `derived-title` | title cut from a paragraph; rename it |
 | `multiple-sheet-blocks` | a sheet or topic holds more than one character sheet |
-| `candidate-split` | a 60+ char bracketed paragraph after a blank line may start an entry |
+| `candidate-split` | a 60+ char bracketed paragraph, or a `[Title]:` header that is not a known section, may start an entry |
 | `empty` | nothing to segment |
 
 Flags are review items, not conclusions. On the Fate capture the segmenter produces 313 entries
@@ -108,12 +108,33 @@ if (!report.ok) throw new Error(report.failures.map(f => f.message).join('\n'));
 | Entries | 313 |
 | Characters | 1,020,281 of 1,020,901 captured (620 are separators, mostly `---` dividers) |
 | Sheets / containers / topics | 301 / 7 / 4 |
-| Flags | 16 (3 real welds, 5 multi-form Servants, 9 bracketed paragraphs, 1 derived title) |
+| Flags | 35 (3 real welds, 5 multi-form Servants, 9 bracketed paragraphs, 19 bracket headers, 1 derived title) |
 | Known boundaries matched | 310 of 317 (the rest are the three welds and a `---` prefix) |
 | Gate failures | 2 duplicate titles: Gilgamesh (two manifestations) and Clock Tower (two topics) |
 
 Both duplicate titles are real: the first was resolved by hand as **Gilgamesh (Caster)**, the
 second as **Clock Tower (Wandering Sea)**. The gate is doing its job.
+
+## Second book, same author (Fate/Grand Order RPG)
+
+Captured whole (no truncation): 139 blank-line blocks, 286,547 chars, `closedLoreEntries: 139` —
+the same over-count as before, because a block is not an entry.
+
+| Measure | Result |
+| --- | --- |
+| Deterministic entries | 16 (15 Servant sheets + the Grail War rules) |
+| Characters covered | 286,517 of 286,547 (30 are separators) |
+| Flags | 34: 24 bracket headers, 5 multi-sheet, 3 bracketed paragraphs, 1 derived title, 1 low confidence |
+| Gate failures | 1 — two entries titled **Goetia** (the 22,011-char profile and the 3,712-char Servant sheet) |
+
+This book is why the bracket header is a *candidate* and not a rule. It opens whole entries with
+lines the Fate book uses for sections: `[Additional Staff List]:`, `- [Team A]:`,
+`[Enemies Will ONLY Appear in their proper Singularities]:`, and one per Singularity
+(`[First Singularity: 'City of a Thousand and One Lies' - NPCs]:`). The same syntax marks a section
+inside a sheet (`[Example Dialogues]:`) and a section inside a container
+(`[Miyama Town Location Images]:` in the Fate book). Syntax cannot tell them apart; the review
+table is where the eleven structural splits get confirmed. A rule here would have split the Fate
+book's Location Images entry into five.
 
 ## Limits
 

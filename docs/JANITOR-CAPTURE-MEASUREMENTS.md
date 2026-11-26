@@ -251,8 +251,13 @@ the previous entry. Four entries carried a stranger's sheet:
 |---|---|---|
 | Medea | 2,188ch sheet | Spirit Origin names Ramesses II / Nefertari → **Ozymandias** |
 | Van-Fem | 1,461ch + 2,064ch | Spirit Origin says Cleopatra VII → **Cleopatra**; Charlemagne's paladin → **Bradamante** |
-| Scáthach | card-level `[Male Characters]`, `[Female Characters]` | headers |
+| Scáthach | `[OOC]: The following characters are listed as Deceased …` plus `[Male Characters]` / `[Female Characters]` and the `… present in the world …` header | headers |
 | Luviagelita Edelfelt | `[Character Definitions]`, `[System Inclusion]`, `[Miyama Town Location Images]`, `[Shinto Location Images]` | headers |
+
+The Scáthach block turned out to be one unified **Deceased Characters** entry (the OOC line, `---`, the
+male list, the female list) followed by a separate `… present in the world/universe …` header; it is
+shipped as two entries (`Deceased Characters`, 3,578ch, and the 156ch `Present Characters` header that
+introduces Rin's sheet), not as a male/female pair.
 
 All were split into their own entries with the author's keywords (`Ozymandias`, `Ramesses II`,
 `King of Kings`, `Sun God`; `Cleopatra`, `The Last Pharaoh`; `Bradamante`, `Knight of White Wings`, …).

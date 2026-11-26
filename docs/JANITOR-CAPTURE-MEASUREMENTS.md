@@ -264,7 +264,11 @@ All were split into their own entries with the author's keywords (`Ozymandias`, 
 The three recovered sheets got a single `- Servant Name:` line re-attached — the only text we added,
 marked here so it is never mistaken for captured prose.
 
-Audit after the split (331 entries / 1,020,321 chars / 956 keys; a 24-char `[Character Definitions]:`
+One more header sat at the end of **Holy Church**: `[Executors]:` followed by `<[Hansa Cervantes]>:` whose body
+(`- Name: Hansa Cervantes`) had been pulled out as its own sheet. Both lines moved to the Hansa entry, so
+the header travels with its body.
+
+Audit after the split (331 entries / 1,020,320 chars / 958 keys; a 24-char `[Character Definitions]:`
 header with nothing under it was dropped): 318 sheet entries, each carrying
 exactly one name line that matches its comment; no duplicate openings; every content a substring of
 the union except those three header lines; all entries `position 4 / depth 10`.
